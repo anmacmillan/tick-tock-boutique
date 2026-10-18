@@ -89,8 +89,9 @@ if __name__ == '__main__':
         for i, (k, t) in enumerate(L.items()):
             f = out / f'{k}.mp3'
             if f.exists() and f.stat().st_size > 1000: continue
+            vid = json.loads((HERE / 'voice_nl.json').read_text())['nl'] if k.startswith('nl-') else sys.argv[2]   # Klokkenland: the Flemish voice
             for attempt in range(3):
-                try: tts(sys.argv[2], t, f); break
+                try: tts(vid, t, f); break
                 except Exception as e: print('retry', k, e); time.sleep(3)
             print(f'{i + 1}/{len(L)}', k)
         (out / 'manifest.json').write_text(json.dumps(sorted(p.stem for p in out.glob('*.mp3') if p.stat().st_size > 1000)))

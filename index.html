@@ -132,7 +132,9 @@
       <button class="tab on" data-mode="clock">⏰ Clocks</button>
       <button class="tab" data-mode="wardrobe">👗 Wardrobe</button>
     </div>
+    <div class="stars" id="tally" title="Levels finished">🏆 0/10</div>
     <div class="stars" id="stars">⭐ 0</div>
+    <button class="icon" id="exitBtn" title="Save and exit">💾</button>
     <button class="icon" id="musicBtn" title="Music">🎵</button>
     <button class="icon" id="soundBtn" title="Sound">🔊</button>
   </header>
@@ -152,6 +154,11 @@
   <div class="row"><button class="big" id="goBtn">Let's play!</button></div>
 </div></div>
 
+<div class="overlay" id="byeOv"><div class="card">
+  <h2>All saved! 💾</h2>
+  <p id="byeText"></p>
+  <div class="row"><button class="big" id="byeBtn">Keep playing</button></div>
+</div></div>
 <div class="overlay" id="lessonOv"><div class="card" id="lessonCard"></div></div>
 <div id="toast"></div>
 
@@ -176,6 +183,33 @@ const DEFAULT = {
 };
 let S = DEFAULT;
 try { const v = JSON.parse(localStorage.getItem(KEY)); if (v) S = { ...DEFAULT, ...v, look: { ...DEFAULT.look, ...(v.look || {}) } }; } catch (e) {}
+// ---------- the cloud copy: iPad Safari can forget a website's data, so progress is also kept in Firebase ----------
+const CLOUD = 'https://wizard-chess-manon-default-rtdb.europe-west1.firebasedatabase.app/ttb/';
+const CODE_CHARS = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
+const urlCode = (new URLSearchParams(location.search).get('p') || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+if (urlCode) {
+  try {   // her personal link: if the cloud copy is newer (or this iPad forgot her), use it
+    const r = await fetch(CLOUD + urlCode + '.json', { cache: 'no-store' });
+    const c = r.ok ? await r.json() : null;
+    if (c && c.name && ((c.t || 0) > (S.t || 0) || !S.started)) S = { ...DEFAULT, ...c, look: { ...DEFAULT.look, ...(c.look || {}) } };
+  } catch (e) {}
+  S.code = urlCode;
+}
+// Firebase drops empty records and turns {1: x, 2: y} into lists, so put the shapes back after loading
+const asObj = v => (Array.isArray(v) ? Object.fromEntries(v.map((x, i) => [i, x]).filter(([, x]) => x != null)) : (v && typeof v === 'object' ? v : {}));
+for (const o of [S, S.en, S.nl].filter(Boolean)) { o.right = asObj(o.right); o.seen = asObj(o.seen); }
+S.prizes = Array.isArray(S.prizes) ? S.prizes : []; S.owned = Array.isArray(S.owned) ? S.owned : [];
+if (S.p) S.p = asObj(S.p);
+S.code = S.code || Array.from(crypto.getRandomValues(new Uint8Array(6)), b => CODE_CHARS[b % CODE_CHARS.length]).join('');
+let cloudTimer = null, cloudDirty = false;
+function cloudSave() {
+  clearTimeout(cloudTimer); cloudTimer = null; cloudDirty = false;
+  try { fetch(CLOUD + S.code + '.json', { method: 'PUT', body: JSON.stringify(S), keepalive: true }).catch(() => { cloudDirty = true; }); } catch (e) { cloudDirty = true; }
+}
+function cloudSoon() { cloudDirty = true; if (!cloudTimer) cloudTimer = setTimeout(cloudSave, 2500); }
+setInterval(() => { if (cloudDirty) cloudSave(); }, 30000);                     // and every 30 seconds in any case
+addEventListener('pagehide', cloudSave);
+document.addEventListener('visibilitychange', () => { if (document.hidden) cloudSave(); });
 S.owned = [...new Set([...S.owned, ...FREE])];
 if (!S.p) {
   // moving from the drawn doll to the princess: every star she spent on old clothes comes back
@@ -185,10 +219,29 @@ if (!S.p) {
 }
 S.pown = [...new Set([...(S.pown || []), ...FREE_ITEMS])];
 S.look.bg = S.look.bg || 'bedroom';
-const save = () => { try { localStorage.setItem(KEY, JSON.stringify(S)); } catch (e) {} };
+const save = () => { S.t = Date.now(); try { localStorage.setItem(KEY, JSON.stringify(S)); } catch (e) {} cloudSoon(); };
+S.nl = S.nl || { level: 1, right: {}, seen: {} };
+S.prizes = S.prizes || [];
+// English progress lives in S.level/unlocked/right/seen; in Klokkenland those hold the Dutch progress and S.en keeps the English
+const enUnlocked = () => (NL() ? S.en.unlocked : S.unlocked);
+const nlOpen = () => Math.min(LEVELS_NL.length, enUnlocked() - 1);   // a Dutch level opens when the same English level is done
+function setWorld(w) {
+  if (w === (S.world || 'en')) return;
+  if (w === 'nl') {
+    S.en = { level: S.level, unlocked: S.unlocked, right: S.right, seen: S.seen };
+    S.world = 'nl'; LEVELS = LEVELS_NL;
+    S.level = Math.min(S.nl.level || 1, nlOpen()); S.unlocked = nlOpen(); S.right = S.nl.right; S.seen = S.nl.seen;
+  } else {
+    S.nl = { level: S.level, right: S.right, seen: S.seen };
+    S.world = 'en'; LEVELS = LEVELS_EN;
+    ({ level: S.level, unlocked: S.unlocked, right: S.right, seen: S.seen } = S.en);
+  }
+  save();
+}
 
-// ---------- the five levels ----------
-const LEVELS = [
+
+// ---------- the levels ----------
+const LEVELS_EN = [
   { name: "O'clock", minutes: [0], snap: 5, need: 6,
     text: ["Every clock has two hands.", "The <b>short pink hand</b> is the <b>hour</b> hand. The <i>long blue hand</i> is the <i>minute</i> hand.",
       "When the long hand points straight up at <i>12</i>, it's something <b>o'clock</b>. Look where the short hand points: that's the hour!"],
@@ -207,17 +260,92 @@ const LEVELS = [
       "On the <b>right</b> side of the clock we say <b>past</b>: twenty past 3.",
       "On the <b>left</b> side we count how many minutes <b>to</b> the next hour: ten to 4."],
     demo: [[3, 0], [3, 50]], hold: [3, 50] },
+  { name: '24-hour clock', kind: '24h', minutes: [0, 30, 15, 45, 0, 30], snap: 5, need: 8, prize: 'cape-1',
+    text: ["A day has <b>24 hours</b>, but the clock face only shows 12. So every time comes round twice: once in the morning and once in the afternoon.",
+      "In the morning the 24-hour clock is the same: 9 o'clock in the morning is <b>09:00</b>.",
+      "After 12 noon, keep counting: <b>add 12</b>! 3 o'clock in the afternoon is 3 + 12 = <b>15:00</b>. Half past 7 in the evening is <b>19:30</b>."],
+    demo: [[3, 0], [3, 30]], hold: [3, 30] },
   { name: 'Every minute', minutes: Array.from({ length: 60 }, (_, i) => i), snap: 1, need: 10, hint: true,
     text: ["The little marks between the numbers are <i>single minutes</i>.",
       "Count in fives to the number just before the long hand, then add the little marks.",
       "You can say it like a digital clock: <b>3:27</b>."],
     demo: [[3, 20], [3, 27]], hold: [3, 27] },
 ];
+// Klokkenland: the Dutch way. Each level opens when the same English level is done.
+const LEVELS_NL = [
+  { name: 'Hele uren', minutes: [0], snap: 5, need: 6, prize: 'hat-4',
+    text: ["Elke klok heeft twee wijzers. De <b>korte roze wijzer</b> is de <b>uurwijzer</b>. De <i>lange blauwe wijzer</i> is de <i>minutenwijzer</i>.",
+      "Staat de lange wijzer recht omhoog op de <i>12</i>? Dan is het een <b>heel uur</b>.", "Kijk waar de korte wijzer staat: dan weet je het uur. Deze klok zegt <b>drie uur</b>."],
+    demo: [[2, 0], [3, 0]] },
+  { name: 'Half', minutes: [30, 30, 0], snap: 5, need: 6, prize: 'veil-4',
+    text: ["Staat de lange wijzer onderaan op de <i>6</i>? Dan is het <b>half</b>.",
+      "Let op! In het Nederlands zeggen we half van het <b>volgende</b> uur. <b>Half vier</b> betekent: nog een half uurtje tot vier uur. Dat is 3:30.",
+      "In het Engels is dat <i>half past three</i>. Twee talen, dezelfde klok!"],
+    demo: [[3, 0], [3, 30]] },
+  { name: 'Kwart over & kwart voor', minutes: [15, 45, 15, 45, 30], snap: 5, need: 8, prize: 'cape-2',
+    text: ["Staat de lange wijzer op de <i>3</i>? Dan is het <b>kwart over</b>: kwart over drie.",
+      "Staat de lange wijzer op de <i>9</i>? Dan is het <b>kwart voor</b> het volgende uur.",
+      "Bij kwart voor vier is de korte wijzer <b>bijna bij de vier</b>."],
+    demo: [[3, 0], [3, 45]] },
+  { name: 'Vijf minuten', minutes: [5, 10, 20, 25, 35, 40, 50, 55, 15, 45], snap: 5, need: 10, hint: true, prize: 'pet-1',
+    text: ["Elk cijfer is <i>vijf minuten</i> voor de lange wijzer.",
+      "Vlak na het uur zeg je <b>over</b>: vijf over drie, tien over drie.",
+      "Rond de half tel je vanaf de <b>half</b>: tien voor half vier (3:20), vijf over half vier (3:35). En vlak voor het uur: tien voor vier."],
+    demo: [[3, 0], [3, 40]] },
+];
+let LEVELS = LEVELS_EN;
+// prizes: won by finishing a level, never sold in the shop
+const PRIZES = Object.fromEntries([...LEVELS_EN.map((l, i) => [l.prize, `Level ${i + 1}`]), ...LEVELS_NL.map((l, i) => [l.prize, `Klokkenland ${i + 1}`])].filter(([k]) => k));
+const NL = () => S.world === 'nl';
+if (S.world === 'nl') { LEVELS = LEVELS_NL; S.unlocked = nlOpen(); }   // she was in Klokkenland last time
+// how many of all the levels she has finished, English and Klokkenland
+function finished() {
+  const en = NL() ? S.en : S, nl = NL() ? S : S.nl;
+  let n = 0;
+  LEVELS_EN.forEach((l, i) => { if (en.unlocked > i + 1 || (i + 1 === LEVELS_EN.length && (en.right[i + 1] || 0) >= l.need)) n++; });
+  LEVELS_NL.forEach(l => { if (S.prizes.includes(l.prize)) n++; });
+  return n;
+}
+const TOTAL_LEVELS = LEVELS_EN.length + LEVELS_NL.length;
+// each level is three small steps: watch the lesson, practise with help, then on your own
+function stepOf(level) {
+  const L = LEVELS[level - 1], got = S.right[level] || 0, half = Math.ceil(L.need / 2);
+  if (!S.seen[level]) return 1;
+  return got < half ? 2 : 3;
+}
 
 // ---------- telling the time in words ----------
 const WORDS = { 5: 'five', 10: 'ten', 15: 'quarter', 20: 'twenty', 25: 'twenty-five', 30: 'half' };
 const nextH = h => (h % 12) + 1;
+const NUM = ['nul', 'één', 'twee', 'drie', 'vier', 'vijf', 'zes', 'zeven', 'acht', 'negen', 'tien', 'elf', 'twaalf', 'dertien', 'veertien'];
+// Dutch counts towards the next half hour: 3:20 is 'tien voor half vier', 3:30 is 'half vier'
+function phraseNL(h, m) {
+  const H = NUM[h], N = NUM[nextH(h)];
+  if (m === 0) return `${H} uur`;
+  if (m === 15) return `kwart over ${H}`;
+  if (m === 30) return `half ${N}`;
+  if (m === 45) return `kwart voor ${N}`;
+  if (m < 15) return `${NUM[m]} over ${H}`;
+  if (m < 30) return `${NUM[30 - m]} voor half ${N}`;
+  if (m < 45) return `${NUM[m - 30]} over half ${N}`;
+  return `${NUM[60 - m]} voor ${N}`;
+}
+function explainNL(h, m) {
+  const H = NUM[h], N = NUM[nextH(h)], p = `<b>${phraseNL(h, m)}</b>`;
+  if (m === 0) return `De <i>lange wijzer</i> staat op de <i>12</i>: een heel uur. De <b>korte wijzer</b> wijst naar de <b>${h}</b>. Het is ${p}.`;
+  if (m === 30) return `De <i>lange wijzer</i> staat op de <i>6</i>: het is half. Let op: half van het <b>volgende</b> uur! De korte wijzer is net voorbij de ${h}, op weg naar de ${nextH(h)}. Het is ${p}.`;
+  if (m === 15) return `De <i>lange wijzer</i> staat op de <i>3</i>: kwart over. De <b>korte wijzer</b> is net voorbij de ${h}. Het is ${p}.`;
+  if (m === 45) return `De <i>lange wijzer</i> staat op de <i>9</i>: kwart voor. De <b>korte wijzer</b> is bijna bij de ${nextH(h)}. Het is ${p}.`;
+  if (m < 15) return `De <i>lange wijzer</i> staat op de <i>${m / 5}</i>: ${NUM[m]} minuten <b>over</b> ${H}. Het is ${p}.`;
+  if (m < 30) return `De <i>lange wijzer</i> staat op de <i>${m / 5}</i>: nog ${NUM[30 - m]} minuten tot <b>half ${N}</b>. Het is ${p}.`;
+  if (m < 45) return `De <i>lange wijzer</i> is ${NUM[m - 30]} minuten <b>voorbij de half</b>. Het is ${p}.`;
+  return `De <i>lange wijzer</i> staat op de <i>${m / 5}</i>: nog ${NUM[60 - m]} minuten tot ${N} uur. Het is ${p}.`;
+}
+// 24-hour clock
+const PERIOD = h24 => (h24 < 12 ? ['☀️', 'in the morning'] : h24 < 18 ? ['🌇', 'in the afternoon'] : ['🌙', 'in the evening']);
+const d24 = (h24, m) => `${String(h24).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
 function phrase(h, m) {
+  if (NL()) return phraseNL(h, m);
   if (m === 0) return `${h} o'clock`;
   if (m <= 30) return `${WORDS[m] || m + (m === 1 ? ' minute' : ' minutes')} past ${h}`;
   const t = 60 - m;
@@ -225,6 +353,7 @@ function phrase(h, m) {
 }
 const digital = (h, m) => `${h}:${String(m).padStart(2, '0')}`;
 function explain(h, m) {
+  if (NL()) return explainNL(h, m);
   const nh = nextH(h);
   if (m === 0) return `The <i>long blue hand</i> points straight up at <i>12</i>, so it's <b>o'clock</b>. The <b>short pink hand</b> points at <b>${h}</b>. So it's <b>${h} o'clock</b>.`;
   if (m === 30) return `The <i>long hand</i> points down at <i>6</i>: halfway round, so it's <b>half past</b>. The <b>short hand</b> has just gone past <b>${h}</b>. So it's <b>half past ${h}</b>.`;
@@ -241,7 +370,14 @@ function clockSVG(h, m, { hint = false, cls = 'clock', id = '' } = {}) {
   const ma = m * 6, ha = ((h % 12) + m / 60) * 30;
   const pt = (a, r) => [Math.sin(a * Math.PI / 180) * r, -Math.cos(a * Math.PI / 180) * r];
   let s = `<svg ${id ? `id="${id}"` : ''} class="${cls}" viewBox="-124 -124 248 248">`;
-  if (hint) {
+  if (hint && NL()) {
+    // over | voor half | over half | voor
+    const Z = [['#dff8e8', 'over', '#2fbf71'], ['#fff0dc', 'voor half', '#ff9a3d'], ['#e3ecff', 'over half', '#3d7bff'], ['#ffe3ef', 'voor', '#ff4f9a']];
+    Z.forEach(([fill, label, col], i) => {
+      const [x1, y1] = pt(i * 90, 100), [x2, y2] = pt(i * 90 + 90, 100), [lx, ly] = pt(i * 90 + 45, 38);
+      s += `<path d="M0 0 L${x1} ${y1} A100 100 0 0 1 ${x2} ${y2} Z" fill="${fill}"/><text x="${lx}" y="${ly + 4}" font-size="11" fill="${col}" font-weight="700" text-anchor="middle">${label}</text>`;
+    });
+  } else if (hint) {
     s += `<path d="M0 0 L0 -100 A100 100 0 0 1 0 100 Z" fill="#dff8e8"/><path d="M0 0 L0 100 A100 100 0 0 1 0 -100 Z" fill="#fff0dc"/>`;
     s += `<text x="44" y="12" font-size="15" fill="#2fbf71" font-weight="700" text-anchor="middle">past</text><text x="-44" y="12" font-size="15" fill="#ff9a3d" font-weight="700" text-anchor="middle">to</text>`;
   }
@@ -354,8 +490,17 @@ async function voice(keys, text) {
   for (const b of bufs) { const src = AC.createBufferSource(); src.buffer = b; src.connect(AC.destination); src.start(t); t += b.duration + 0.08; }
   setTimeout(() => { if (MUSIC && id === voiceGen) MUSIC.gain.setTargetAtTime(0.55, AC.currentTime, 0.4); }, (t - AC.currentTime) * 1000);
 }
-const timeKey = (h, m) => (m % 5 === 0 ? `t-${h}-${m}` : null);
+const timeKey = (h, m) => (m % 5 === 0 ? `${NL() ? 'nl-' : ''}t-${h}-${m}` : null);
 const CHEERS = ['Brilliant!', 'Yes!', 'Well done!', 'Super!', 'Amazing!', 'You got it!'];
+const CHEERS_NL = ['Goed zo!', 'Super!', 'Knap gedaan!', 'Prima!', 'Fantastisch!', 'Helemaal juist!'];
+const TXT = {
+  en: { read: 'What time does the clock say?', which: 'Which clock says', set: 'Move the hands to show', check: 'Check ✓', next: 'Next clock ➜', help: 'Help', hidehelp: 'Hide help', learn: 'How it works', notquite: 'Not quite.', level: 'Level',
+    drag: 'Drag the <b style="color:#ff4f9a">short pink hand</b> to the hour and the <b style="color:#3d7bff">long blue hand</b> to the minutes.' },
+  nl: { read: 'Hoe laat is het?', which: 'Welke klok zegt', set: 'Zet de wijzers op', check: 'Klaar ✓', next: 'Volgende klok ➜', help: 'Hulp', hidehelp: 'Hulp weg', learn: 'Hoe werkt het?', notquite: 'Bijna!', level: 'Niveau',
+    drag: 'Sleep de <b style="color:#ff4f9a">korte roze wijzer</b> naar het uur en de <b style="color:#3d7bff">lange blauwe wijzer</b> naar de minuten.' },
+};
+const T = k => TXT[NL() ? 'nl' : 'en'][k];
+const VK = k => (NL() ? 'nl-' + k : k);   // Dutch clips are the same names with nl- in front
 // every line the character says, for the recording script
 window.__ttbLines = () => {
   const L = {};
@@ -366,7 +511,14 @@ window.__ttbLines = () => {
   L.level = 'Hooray! A brand new level!';
   L.need = "You need a few more stars. Let's read some clocks!";
   L.hello = `Hello ${S.name}! Let's learn the clock.`;
-  LEVELS.forEach((l, i) => { L[`lesson-${i + 1}`] = l.text.join(' ').replace(/<[^>]+>/g, ''); });
+  LEVELS_EN.forEach((l, i) => { L[`lesson-${i + 1}`] = l.text.join(' ').replace(/<[^>]+>/g, ''); });
+  // Klokkenland, in the Flemish voice
+  for (let h = 1; h <= 12; h++) for (let m = 0; m < 60; m += 5) L[`nl-t-${h}-${m}`] = phraseNL(h, m) + '.';
+  CHEERS_NL.forEach((c, i) => { L[`nl-cheer-${i}`] = c; });
+  L['nl-nq'] = 'Bijna! Kijk goed naar de wijzers.';
+  L['nl-bonus'] = 'Vijf op een rij! Extra sterren!';
+  L['nl-hello'] = `Welkom in Klokkenland, ${S.name}! Hier leren we de klok in het Nederlands, en je krijgt dubbele sterren.`;
+  LEVELS_NL.forEach((l, i) => { L[`nl-lesson-${i + 1}`] = l.text.join(' ').replace(/<[^>]+>/g, ''); });
   ITEMS.filter(it => it.cost > 0).forEach(it => { L[`got-${it.id}`] = `You got the ${it.name.toLowerCase()}!`; });
   for (const [part, list] of Object.entries(SHOP)) for (const [style, name, cost] of list) if (cost > 0) L[`got-p-${part}-${style}`] = `You got the ${name.toLowerCase()}!`;
   for (const k in L) L[k] = minnit(L[k]);
@@ -381,6 +533,11 @@ function say(text) {
     speechSynthesis.cancel();
     const u = new SpeechSynthesisUtterance(minnit(text.replace(/<[^>]+>/g, '')));
     const vs = speechSynthesis.getVoices();
+    if (NL()) {
+      const nv = vs.find(x => /nl[-_]BE/i.test(x.lang)) || vs.find(x => /^nl/i.test(x.lang));
+      if (nv) u.voice = nv; u.lang = nv ? nv.lang : 'nl-BE'; u.rate = 0.95; u.pitch = 1.1;
+      speechSynthesis.speak(u); return;
+    }
     const v = ['Kate', 'Serena', 'Martha', 'Stephanie', 'Google UK English Female', 'Fiona', 'Moira'].map(n => vs.find(x => x.name.includes(n))).find(Boolean)
       || vs.find(x => /en[-_]GB/i.test(x.lang));
     if (v) u.voice = v; u.lang = 'en-GB'; u.rate = 0.95; u.pitch = 1.25;
@@ -426,7 +583,10 @@ function renderTop() {
   $('#soundBtn').textContent = S.sound ? '🔊' : '🔈';
   $('#musicBtn').style.opacity = S.music ? 1 : 0.4;
   const L = LEVELS[S.level - 1], got = S.right[S.level] || 0;
-  $('#levelBar').innerHTML = `<b>Level ${S.level}: ${L.name}</b>${S.level < 5 && S.level === S.unlocked ? `<div class="bar"><i style="width:${Math.min(100, got / L.need * 100)}%"></i></div>` : ''}`;
+  $('#tally').textContent = `🏆 ${finished()}/${TOTAL_LEVELS}`;
+  const st = stepOf(S.level), stepName = NL() ? ['Kijk en leer', 'Oefen met hulp', 'Zelf doen'][st - 1] : ['Watch & learn', 'Practise with help', 'On your own'][st - 1];
+  const showBar = (S.level === S.unlocked && S.level < LEVELS.length && !NL()) || (L.prize && !S.prizes.includes(L.prize));
+  $('#levelBar').innerHTML = `<b>${NL() ? '🇧🇪 ' : ''}${T('level')} ${S.level}: ${L.name}</b>${L.prize && !S.prizes.includes(L.prize) ? ' 🎁' : ''}${showBar ? `<div style="font-size:14px;color:#7a5aa6;margin-top:2px">${NL() ? 'Stap' : 'Step'} ${st} ${NL() ? 'van' : 'of'} 3 · ${['📖', '💡', '⭐'][st - 1]} ${stepName}</div><div class="bar" style="display:flex;gap:3px;background:none">${[0, 1, 2].map(i => { const half = Math.ceil(L.need / 2), fill = i === 0 ? (S.seen[S.level] ? 1 : 0) : i === 1 ? Math.min(1, got / half) : Math.max(0, Math.min(1, (got - half) / (L.need - half))); return `<span style="flex:1;background:#f3e3ee;border-radius:6px;overflow:hidden"><i style="display:block;height:100%;width:${fill * 100}%;background:linear-gradient(90deg,#ff8fc0,#8a5cf6)"></i></span>`; }).join('')}</div>` : ''}`;
 }
 
 // ---------- questions ----------
@@ -436,9 +596,16 @@ function newQuestion() {
   let lv = S.level;
   if (lv > 1 && Math.random() < 0.25) lv = 1 + rand(lv - 1);    // a few easier ones to keep them fresh
   const m = pick(LEVELS[lv - 1].minutes), h = 1 + rand(12);
-  const type = S.total < 2 ? 'read' : pick(['read', 'read', 'set', 'which']);
+  let type = S.total < 2 ? 'read' : pick(['read', 'read', 'set', 'which']);
+  if (LEVELS[lv - 1].kind === '24h') type = pick(['to24', 'to24', 'from24']);
   Q = { h, m, type, lv };
-  answered = false; hintOn = !!L.hint && false;
+  if (type === 'to24' || type === 'from24') {
+    const h24 = pick([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23]);
+    Q.h24 = h24; Q.h = h24 % 12 || 12;
+    const alts = [h24 + 12, h24 - 12, h24 + 2, h24 - 2, h24 + 1].filter(x => x >= 0 && x <= 23 && x !== h24 && x !== 0 && x !== 12);
+    Q.opts24 = shuffle([h24, ...shuffle(alts).slice(0, 2)]);
+  }
+  answered = false; hintOn = stepOf(S.level) === 2 || !!L.hint && false;   // 'practise with help' switches the help clock on
   if (type === 'read') Q.opts = shuffle([[h, m], ...distractors(h, m, 2)]);
   if (type === 'which') Q.opts = shuffle([[h, m], ...distractors(h, m, 2)]);
   if (type === 'set') { const sh = pick([2, 3, 4, 8, 9, 10].filter(x => x !== h)); Q.t = sh * 60; }   // hands start apart, so both can be seen and grabbed
@@ -465,23 +632,31 @@ function distractors(h, m, n) {
 function renderPanel() {
   if (mode === 'wardrobe') return renderWardrobe();
   const L = LEVELS[S.level - 1];
-  let html = `<div class="levels">${LEVELS.map((l, i) => `<button class="lv ${i + 1 === S.level ? 'on' : ''} ${i + 1 > S.unlocked ? 'locked' : ''}" data-lv="${i + 1}">${i + 1 > S.unlocked ? '🔒 ' : ''}${l.name}</button>`).join('')}</div>`;
+  const worlds = `<div class="levels"><button class="lv ${NL() ? '' : 'on'}" data-world="en">🇬🇧 English</button><button class="lv ${NL() ? 'on' : ''} ${nlOpen() < 1 ? 'locked' : ''}" data-world="nl">${nlOpen() < 1 ? '🔒 ' : ''}🇧🇪 Klokkenland ⭐⭐</button></div>`;
+  let html = worlds + `<div class="levels">${LEVELS.map((l, i) => `<button class="lv ${i + 1 === S.level ? 'on' : ''} ${i + 1 > S.unlocked ? 'locked' : ''}" data-lv="${i + 1}">${i + 1 > S.unlocked ? '🔒 ' : ''}${l.prize && !S.prizes.includes(l.prize) ? '🎁 ' : ''}${l.name}</button>`).join('')}</div>`;
   const hint = hintOn;
-  if (Q.type === 'read') {
-    html += `<div class="q">What time does the clock say?</div><div class="clockwrap">${clockSVG(Q.h, Q.m, { hint })}</div>
+  if (Q.type === 'to24') {
+    const [ic, per] = PERIOD(Q.h24);
+    html += `<div class="q">It's <b>${phrase(Q.h, Q.m)} ${per}</b> ${ic}<br>What is that on a 24-hour clock?</div><div class="clockwrap">${clockSVG(Q.h, Q.m, { hint })}</div>
+      <div class="opts">${Q.opts24.map((x, i) => `<button class="opt" data-i24="${i}">${d24(x, Q.m)}</button>`).join('')}</div>`;
+  } else if (Q.type === 'from24') {
+    html += `<div class="q">The 24-hour clock says</div><div class="digital" style="font-size:64px">${d24(Q.h24, Q.m)}</div><div class="q">What time is that?</div>
+      <div class="opts">${Q.opts24.map((x, i) => { const [ic, per] = PERIOD(x); return `<button class="opt" data-i24="${i}">${ic} ${phrase(x % 12 || 12, Q.m)} ${per}</button>`; }).join('')}</div>`;
+  } else if (Q.type === 'read') {
+    html += `<div class="q">${T('read')}</div><div class="clockwrap">${clockSVG(Q.h, Q.m, { hint })}</div>
       <div class="opts">${Q.opts.map(([a, b], i) => `<button class="opt" data-i="${i}">${phrase(a, b)}<small>${digital(a, b)}</small></button>`).join('')}</div>`;
   } else if (Q.type === 'which') {
-    html += `<div class="q">Which clock says <b>${phrase(Q.h, Q.m)}</b>?</div>
+    html += `<div class="q">${T('which')} <b>${phrase(Q.h, Q.m)}</b>?</div>
       <div class="three">${Q.opts.map(([a, b], i) => `<button data-i="${i}">${clockSVG(a, b, { hint, cls: 'clock small' })}</button>`).join('')}</div>`;
   } else {
     const [hh, mm] = fromT(Q.t);
-    html += `<div class="q">Move the hands to show <b>${phrase(Q.h, Q.m)}</b></div>
+    html += `<div class="q">${T('set')} <b>${phrase(Q.h, Q.m)}</b></div>
       <div class="clockwrap">${clockSVG(hh, mm, { hint, id: 'setClock' })}</div>
-      <div style="text-align:center;font-size:16px;color:#7a5aa6">Drag the <b style="color:#ff4f9a">short pink hand</b> to the hour and the <b style="color:#3d7bff">long blue hand</b> to the minutes.</div>
+      <div style="text-align:center;font-size:16px;color:#7a5aa6">${T('drag')}</div>
       <div class="digital" id="setDigital" style="visibility:${hint ? 'visible' : 'hidden'}">${digital(hh, mm)}</div>
-      <div class="row"><button class="big purple" id="checkBtn">Check ✓</button></div>`;
+      <div class="row"><button class="big purple" id="checkBtn">${T('check')}</button></div>`;
   }
-  html += `<div id="feedback"></div><div class="row"><button class="soft" id="hintBtn">💡 ${hint ? 'Hide help' : 'Help'}</button><button class="soft" id="learnBtn">📖 How it works</button></div>`;
+  html += `<div id="feedback"></div><div class="row"><button class="soft" id="hintBtn">💡 ${hint ? T('hidehelp') : T('help')}</button><button class="soft" id="learnBtn">📖 ${T('learn')}</button></div>`;
   $('#panel').innerHTML = html;
   if (Q.type === 'set') bindSetClock();
 }
@@ -539,32 +714,48 @@ function bindSetClock() {
   });
 }
 
+function explain24(h24, m) {
+  const h = h24 % 12 || 12, [ic, per] = PERIOD(h24);
+  return h24 < 12
+    ? `${ic} In the <b>morning</b> the 24-hour clock is the same as the normal clock: <b>${phrase(h, m)} ${per}</b> is <b>${d24(h24, m)}</b>.`
+    : `${ic} After 12 noon, <b>add 12</b>: ${h} + 12 = ${h24}. So <b>${phrase(h, m)} ${per}</b> is <b>${d24(h24, m)}</b>.`;
+}
 async function answer(ok, el) {
   answered = true;
   const fb = $('#feedback');
   if (ok) {
     S.total++; S.streak++;
     const bonus = S.streak % 5 === 0 ? 1 : 0;
-    S.stars += 1 + bonus;
+    S.stars += (1 + bonus) * (NL() ? 2 : 1);     // double stars in Klokkenland
     S.right[S.level] = (S.right[S.level] || 0) + (Q.lv === S.level ? 1 : 0);
     save(); sfx.good(); flyStar(el); renderDoll('happy'); confetti(bonus ? 70 : 30);
-    const ci = rand(CHEERS.length), cheer = CHEERS[ci];
-    fb.innerHTML = `<div class="explain good">${cheer} It's <b>${phrase(Q.h, Q.m)}</b> (${digital(Q.h, Q.m)}).${bonus ? ' 🎉 Five in a row: a bonus star!' : ''}</div>`;
-    const tk = timeKey(Q.h, Q.m);   // every-minute times have no recording: the iPad voice says those
-    voice(tk ? [`cheer-${ci}`, tk, ...(bonus ? ['bonus'] : [])] : [], `${cheer} ${phrase(Q.h, Q.m)}`);
+    const ci = rand(CHEERS.length), cheer = (NL() ? CHEERS_NL : CHEERS)[ci];
+    const said = Q.h24 !== undefined ? `${phrase(Q.h, Q.m)} ${PERIOD(Q.h24)[1]}` : phrase(Q.h, Q.m);
+    fb.innerHTML = `<div class="explain good">${cheer} ${NL() ? 'Het is' : "It's"} <b>${said}</b> (${Q.h24 !== undefined ? d24(Q.h24, Q.m) : digital(Q.h, Q.m)}).${bonus ? (NL() ? ' 🎉 Vijf op een rij: extra sterren!' : ' 🎉 Five in a row: a bonus star!') : ''}</div>`;
+    const tk = Q.h24 === undefined && timeKey(Q.h, Q.m);   // every-minute and 24-hour times use the iPad voice
+    voice(tk ? [VK(`cheer-${ci}`), tk, ...(bonus ? [VK('bonus')] : [])] : [], `${cheer} ${said}`);
     renderTop();
     await sleep(1700);
     const L = LEVELS[S.level - 1];
-    if (S.level === S.unlocked && S.level < 5 && (S.right[S.level] || 0) >= L.need) {
-      S.unlocked++; S.level = S.unlocked; save(); sfx.level(); confetti(90); voice(['level'], '');
-      toast(`🎉 New level: <b>${LEVELS[S.level - 1].name}</b>!`);
-      showLesson(S.level);
+    if ((S.right[S.level] || 0) >= L.need) {
+      if (L.prize && !S.prizes.includes(L.prize)) {       // finishing a level wins its prize
+        const [pp, ps] = L.prize.split('-'); S.prizes.push(L.prize); S.pown.push(L.prize); save();
+        sfx.buy(); confetti(120); toast(`🎁 ${NL() ? 'Je hebt gewonnen' : 'You won'}: <b>${esc(itemName(pp, +ps))}</b>! ${NL() ? 'Kijk in je kleerkast.' : 'Look in your wardrobe.'}`);
+        voice([`got-p-${L.prize}`], `You won the ${itemName(pp, +ps)}!`);
+        await sleep(1800);
+      }
+      if (S.level === S.unlocked && S.level < LEVELS.length && !NL()) {
+        S.unlocked++; S.level = S.unlocked; save(); sfx.level(); confetti(90); voice(['level'], '');
+        toast(`🎉 New level: <b>${LEVELS[S.level - 1].name}</b>!${nlOpen() > (S.unlocked - 2) && S.unlocked - 1 <= LEVELS_NL.length ? ' 🇧🇪 And a new Klokkenland level!' : ''}`);
+        showLesson(S.level);
+      }
     }
     newQuestion(); renderTop();
   } else {
     S.streak = 0; save(); sfx.bad(); renderDoll('sad');
-    fb.innerHTML = `<div class="explain">${explain(Q.h, Q.m)}</div><div class="row"><button class="big" id="nextBtn">Next clock ➜</button></div>`;
-    if (CLIPS.has('nq') && timeKey(Q.h, Q.m) && CLIPS.has(timeKey(Q.h, Q.m))) voice(['nq', timeKey(Q.h, Q.m)], ''); else say(`Not quite. ${explain(Q.h, Q.m)}`);
+    const ex = Q.h24 !== undefined ? explain24(Q.h24, Q.m) : explain(Q.h, Q.m);
+    fb.innerHTML = `<div class="explain">${ex}</div><div class="row"><button class="big" id="nextBtn">${T('next')}</button></div>`;
+    if (Q.h24 === undefined && CLIPS.has(VK('nq')) && CLIPS.has(timeKey(Q.h, Q.m) || '-')) voice([VK('nq'), timeKey(Q.h, Q.m)], ''); else say(`${T('notquite')} ${ex}`);
     if (Q.type === 'set') {         // show the right answer on the clock
       Q.t = (Q.h % 12) * 60 + Q.m; const svg = $('#setClock');
       svg.outerHTML = clockSVG(Q.h, Q.m, { hint: hintOn, id: 'setClock' });
@@ -579,8 +770,8 @@ let lessonAnim = 0;
 function showLesson(n) {
   const L = LEVELS[n - 1];
   S.seen[n] = true; save();
-  $('#lessonCard').innerHTML = `<h2>Level ${n}: ${L.name}</h2>
-    <div class="legend"><span style="--c:#ff4f9a">short = hour</span><span style="--c:#3d7bff">long = minutes</span></div>
+  $('#lessonCard').innerHTML = `<h2>${NL() ? '🇧🇪 ' : ''}${T('level')} ${n}: ${L.name}</h2>
+    <div class="legend"><span style="--c:#ff4f9a">${NL() ? 'kort = uur' : 'short = hour'}</span><span style="--c:#3d7bff">${NL() ? 'lang = minuten' : 'long = minutes'}</span></div>
     <div id="demoClock"></div><div class="digital" id="demoDigital"></div>
     ${L.text.map(t => `<p>${t}</p>`).join('')}
     <div class="row"><button class="soft" id="replayBtn">↺ Watch again</button><button class="big" id="gotBtn">Got it!</button></div>`;
@@ -595,13 +786,13 @@ function showLesson(n) {
       const [hh, mm] = fromT(t);
       $('#demoClock').innerHTML = clockSVG(hh, mm, { hint: n >= 4 });
       $('#demoDigital').textContent = digital(hh, mm);
-      if (p < 1) requestAnimationFrame(step); else voice([`lesson-${n}`], L.text.join(' '));
+      if (p < 1) requestAnimationFrame(step); else voice([VK(`lesson-${n}`)], L.text.join(' '));
     };
     requestAnimationFrame(step);
   };
   play();
   $('#replayBtn').onclick = () => { sfx.tick(); play(); };
-  $('#gotBtn').onclick = () => { lessonAnim++; speechSynthesis && speechSynthesis.cancel(); $('#lessonOv').classList.remove('show'); };
+  $('#gotBtn').onclick = () => { renderTop(); if (stepOf(S.level) === 2 && Q && !answered) { hintOn = true; renderPanel(); } lessonAnim++; speechSynthesis && speechSynthesis.cancel(); $('#lessonOv').classList.remove('show'); };
 }
 
 // ---------- wardrobe ----------
@@ -620,9 +811,9 @@ function renderWardrobe() {
     for (const part of C.parts) {
       if (C.parts.length > 1) grid += `<div class="grouplabel">${{ hat: 'Crowns', veil: 'Veils', necklace: 'Necklaces', earrings: 'Earrings', bracelets: 'Bracelets', gloves: 'Gloves', girdle: 'Belts', in_hand_left: 'Low hand', in_hand_right: 'High hand', eyes: 'Eyes', irises: 'Eye colour', eyebrows: 'Eyebrows', lips: 'Lips', cheeks: 'Blush' }[part]}</div>`;
       grid += SHOP[part].map(([style, name, cost]) => {
-        const id = `${part}-${style}`, own = S.pown.includes(id), worn = S.p[part] && S.p[part][0] === style;
+        const id = `${part}-${style}`, own = S.pown.includes(id), worn = S.p[part] && S.p[part][0] === style, prize = PRIZES[id];
         return `<button class="item ${own ? '' : 'locked'} ${worn ? 'on' : ''} ${confirmId === id ? 'confirm' : ''}" data-part="${part}" data-style="${style}">
-          ${own ? '' : `<span class="price">⭐ ${cost}</span>`}<img class="th" src="${thumbURL(part, style)}" alt="">
+          ${own ? '' : prize ? `<span class="price">🎁 ${prize}</span>` : `<span class="price">⭐ ${cost}</span>`}<img class="th" src="${thumbURL(part, style)}" alt="">
           <div class="nm">${confirmId === id ? 'Tap again to buy!' : esc(name)}</div></button>`;
       }).join('');
     }
@@ -646,6 +837,15 @@ function wearPart(part, style) {
 $('#panel').addEventListener('click', e => {
   audio();
   const lv = e.target.closest('[data-lv]');
+  const wb = e.target.closest('[data-world]');
+  if (wb) {
+    const w = wb.dataset.world;
+    if (w === 'nl' && nlOpen() < 1) { toast("Finish level 1 (O'clock) to open Klokkenland! 🇧🇪"); return; }
+    setWorld(w); sfx.pop(); renderTop();
+    if (w === 'nl' && !S.seen.nlhello) { S.seen.nlhello = true; save(); voice(['nl-hello'], 'Welkom in Klokkenland!'); toast('🇧🇪 Welkom in Klokkenland! Hier krijg je dubbele sterren.'); }
+    if (!S.seen[S.level]) showLesson(S.level);
+    newQuestion(); return;
+  }
   if (lv) { const n = +lv.dataset.lv; if (n > S.unlocked) { toast('Finish the level before to open this one!'); return; } S.level = n; save(); renderTop(); if (!S.seen[n]) showLesson(n); newQuestion(); return; }
   const c = e.target.closest('[data-cat]');
   if (c) { sfx.pop(); cat = c.dataset.cat; confirmId = null; renderWardrobe(); return; }
@@ -666,6 +866,7 @@ $('#panel').addEventListener('click', e => {
   if (itb) {
     const part = itb.dataset.part, style = +itb.dataset.style, id = `${part}-${style}`, cost = itemCost(part, style), name = itemName(part, style);
     if (S.pown.includes(id)) { confirmId = null; sfx.pop(); wearPart(part, style); return; }
+    if (PRIZES[id]) { toast(`🎁 This is a prize! Finish <b>${PRIZES[id]}</b> to win it.`); sfx.bad(); return; }
     if (S.stars < cost) { toast(`You need ${cost - S.stars} more ⭐. Go and read some clocks!`); sfx.bad(); voice(['need'], ''); return; }
     if (confirmId !== id) { confirmId = id; renderWardrobe(); return; }
     S.stars -= cost; S.pown.push(id); confirmId = null; save(); sfx.buy(); confetti(40);
@@ -676,6 +877,14 @@ $('#panel').addEventListener('click', e => {
   if (answered || !Q) return;
   if (e.target.closest('#hintBtn')) { hintOn = !hintOn; const t = Q.t; renderPanel(); if (Q.type === 'set') Q.t = t; return; }
   if (e.target.closest('#learnBtn')) { showLesson(S.level); return; }
+  const o24 = e.target.closest('[data-i24]');
+  if (o24 && Q.opts24) {
+    sfx.pop();
+    const ok = Q.opts24[+o24.dataset.i24] === Q.h24;
+    o24.classList.add(ok ? 'good' : 'bad');
+    if (!ok) $(`[data-i24="${Q.opts24.indexOf(Q.h24)}"]`).classList.add('good');
+    answer(ok, o24); return;
+  }
   const o = e.target.closest('[data-i]');
   if (o && (Q.type === 'read' || Q.type === 'which')) {
     sfx.pop();
@@ -693,6 +902,12 @@ document.querySelectorAll('.tab').forEach(t => t.addEventListener('click', () =>
   document.querySelectorAll('.tab').forEach(x => x.classList.toggle('on', x === t));
   renderPanel();
 }));
+$('#exitBtn').addEventListener('click', () => {
+  save(); cloudSave(); sfx.ding();
+  $('#byeText').innerHTML = `⭐ ${S.stars} stars &nbsp;·&nbsp; 🏆 ${finished()} of ${TOTAL_LEVELS} levels<br>Everything is saved, so you can close the game now.<br>See you next time, ${esc(S.name)}!<br><small style="color:#9a86ad">Save code: <b>${S.code}</b></small>`;
+  $('#byeOv').classList.add('show'); voice(['nl-bye'].filter(() => NL()), NL() ? 'Alles is bewaard. Tot de volgende keer!' : 'Everything is saved. See you next time!');
+});
+$('#byeBtn').addEventListener('click', () => $('#byeOv').classList.remove('show'));
 $('#soundBtn').addEventListener('click', () => { S.sound = !S.sound; save(); renderTop(); });
 $('#musicBtn').addEventListener('click', () => { S.music = !S.music; save(); renderTop(); if (S.music) startMusic(); else stopMusic(); });
 $('#goBtn').addEventListener('click', () => {
@@ -710,6 +925,7 @@ if (!S.started) { $('#nameIn').value = S.name; $('#welcome').classList.add('show
 if (S.refund) { const n = S.refund; setTimeout(() => toast(`👑 Welcome to the new Princess Boutique! Your ${n} stars from old clothes are back to spend.`), 800); S.refund = 0; save(); }
 document.addEventListener('pointerdown', () => { audio(); startMusic(); }, true);
 document.addEventListener('visibilitychange', () => { if (!document.hidden && AC && AC.state !== 'running') AC.resume(); });
+cloudSave();   // make sure the cloud has her from the first moment
 window.__ttb = { get S() { return S; }, get Q() { return Q; } };
 </script>
 </body>
