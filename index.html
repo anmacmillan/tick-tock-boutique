@@ -41,7 +41,10 @@
   body.portrait main { grid-template-columns: 1fr; grid-template-rows: 36% 1fr; }
   #stage { position: relative; background: #fff; border-radius: 24px; box-shadow: 0 6px 0 #f0c6dd, 0 14px 30px rgba(138,92,246,.15); overflow: hidden; display: flex; flex-direction: column; }
   #doll { flex: 1; min-height: 0; display: flex; justify-content: center; align-items: center; }
-  #doll svg { height: 100%; max-width: 100%; }
+  #doll svg { height: 100%; max-width: 100%; animation: sway 4s ease-in-out infinite; transform-origin: 50% 90%; }
+  @keyframes sway { 0%,100% { transform: rotate(-1deg) } 50% { transform: rotate(1deg) translateY(-1%) } }
+  .twinkle { position: absolute; pointer-events: none; font-size: 18px; opacity: 0; animation: twinkle 3.4s ease-in-out infinite; }
+  @keyframes twinkle { 0%,100% { opacity: 0; transform: scale(.4) } 50% { opacity: .9; transform: scale(1) rotate(30deg) } }
   #doll.happy svg { animation: hop .8s ease; }
   #doll.sad svg { animation: tilt .8s ease; }
   @keyframes hop { 0%,100% { transform: translateY(0) } 30% { transform: translateY(-6%) rotate(-3deg) } 60% { transform: translateY(0) rotate(3deg) } }
@@ -247,9 +250,10 @@ function audio() {
     const fb = AC.createGain(); fb.gain.value = 0.28;
     const wet = AC.createGain(); wet.gain.value = 0.22;
     BUS.connect(d); d.connect(fb).connect(d); d.connect(wet).connect(AC.destination);
-    MUSIC = AC.createGain(); MUSIC.gain.value = 0.55; MUSIC.connect(BUS);
+    MUSIC = AC.createGain(); MUSIC.gain.value = 0.55; MUSIC.connect(AC.destination);
   }
-  if (AC.state === 'suspended') AC.resume();
+  // iOS starts suspended, and a phone or FaceTime call leaves it 'interrupted': wake it up
+  if (AC.state !== 'running') { AC.resume(); try { speechSynthesis.cancel(); } catch (e) {} }
   return AC;
 }
 function tone(f, t0, dur, vol = 0.12, type = 'sine', { to = null, out = null, force = false } = {}) {
@@ -261,26 +265,44 @@ function tone(f, t0, dur, vol = 0.12, type = 'sine', { to = null, out = null, fo
   o.connect(g).connect(out || BUS); o.start(t); o.stop(t + dur + 0.05);
 }
 const bell = (f, t0, vol = 0.08, out) => { tone(f, t0, 1.1, vol, 'sine', { out }); tone(f * 2, t0, 0.6, vol * 0.35, 'sine', { out }); tone(f * 3.01, t0, 0.3, vol * 0.15, 'sine', { out }); };
+const FX = (key, vol = 0.8) => {   // play a recorded effect if there is one
+  if (!S.sound || !CLIPS.has(key)) return false;
+  clip(key).then(b => { if (!b) return; const s = AC.createBufferSource(), g = AC.createGain(); g.gain.value = vol; s.buffer = b; s.connect(g).connect(AC.destination); s.start(); });
+  return true;
+};
 const sfx = {
-  good: () => { [1047, 1319, 1568, 2093].forEach((f, i) => bell(f, i * 0.07, 0.07)); },
-  bad: () => { tone(520, 0, 0.55, 0.08, 'sine', { to: 330 }); tone(526, 0.02, 0.55, 0.05, 'triangle', { to: 336 }); },
+  wear: () => FX('fx-wear', 0.6) || tone(900, 0, 0.12, 0.06, 'sine', { to: 1800 }),
+  yay: () => FX('fx-yay', 0.7),
+  good: () => { if (FX('fx-correct', 0.7)) return; [1047, 1319, 1568, 2093].forEach((f, i) => bell(f, i * 0.07, 0.07)); },
+  bad: () => { if (FX('fx-wrong', 0.6)) return; tone(520, 0, 0.55, 0.08, 'sine', { to: 330 }); tone(526, 0.02, 0.55, 0.05, 'triangle', { to: 336 }); },
   tick: () => tone(1800, 0, 0.03, 0.04, 'square'),
   pop: () => tone(420, 0, 0.09, 0.12, 'sine', { to: 1100 }),
   boing: () => { tone(260, 0, 0.18, 0.1, 'triangle', { to: 620 }); tone(620, 0.18, 0.22, 0.08, 'triangle', { to: 300 }); },
-  ding: () => { bell(1568, 0, 0.09); bell(2093, 0.06, 0.07); },
-  buy: () => { for (let i = 0; i < 14; i++) bell(800 + i * 110 + Math.random() * 60, i * 0.04, 0.045); },
-  level: () => [523, 659, 784, 1047, 784, 1047, 1319].forEach((f, i) => bell(f, i * 0.13, 0.08)),
+  ding: () => { if (FX('fx-star', 0.6)) return; bell(1568, 0, 0.09); bell(2093, 0.06, 0.07); },
+  buy: () => { if (FX('fx-buy', 0.7)) return; for (let i = 0; i < 14; i++) bell(800 + i * 110 + Math.random() * 60, i * 0.04, 0.045); },
+  level: () => FX('fx-level', 0.8) || [523, 659, 784, 1047, 784, 1047, 1319].forEach((f, i) => bell(f, i * 0.13, 0.08)),
 };
 // a gentle music-box tune, made up for this game, looping quietly in the background
 const TUNE = [76, 79, 84, 79, 81, 79, 76, 72, 74, 76, 79, 76, 74, 72, 74, 0, 76, 79, 84, 86, 84, 81, 79, 76, 77, 76, 74, 72, 74, 72, 72, 0];
 const BASS = [48, 43, 45, 43, 48, 41, 43, 48];
 let musicT = 0, musicStep = 0, musicTimer = null;
 const midi = n => 440 * Math.pow(2, (n - 69) / 12);
+let musicSrc = null;
 function startMusic() {
-  if (musicTimer || !S.music) return;
+  if (musicTimer || musicSrc || !S.music) return;
   const ac = audio(); if (!ac) return;
+  if (CLIPS.has('music')) {
+    musicSrc = 'loading';
+    clip('music').then(b => {
+      if (!b || !S.music || musicSrc !== 'loading') { musicSrc = null; return; }
+      const src = ac.createBufferSource(), g = ac.createGain(); g.gain.value = 0.32;
+      src.buffer = b; src.loop = true; src.connect(g).connect(MUSIC); src.start(); musicSrc = src;
+    });
+    return;
+  }
   musicT = ac.currentTime + 0.1;
   musicTimer = setInterval(() => {
+    if (musicT < ac.currentTime) musicT = ac.currentTime + 0.05;   // after a call, don't play the missed notes all at once
     while (musicT < ac.currentTime + 0.6) {
       const n = TUNE[musicStep % TUNE.length];
       if (n) bell(midi(n), musicT - ac.currentTime, 0.035, MUSIC);
@@ -289,7 +311,7 @@ function startMusic() {
     }
   }, 150);
 }
-function stopMusic() { clearInterval(musicTimer); musicTimer = null; }
+function stopMusic() { clearInterval(musicTimer); musicTimer = null; if (musicSrc && musicSrc !== 'loading') musicSrc.stop(); musicSrc = null; }
 // Recorded voice clips (voice/<key>.mp3, listed in voice/manifest.json) are used
 // when they exist; anything not recorded falls back to the iPad's own voice.
 let CLIPS = new Set(); const BUF = new Map();
@@ -326,14 +348,17 @@ window.__ttbLines = () => {
   L.hello = `Hello ${S.name}! Let's learn the clock.`;
   LEVELS.forEach((l, i) => { L[`lesson-${i + 1}`] = l.text.join(' ').replace(/<[^>]+>/g, ''); });
   ITEMS.filter(it => it.cost > 0).forEach(it => { L[`got-${it.id}`] = `You got the ${it.name.toLowerCase()}!`; });
+  for (const k in L) L[k] = minnit(L[k]);
   return L;
 };
 
+// spelt as it sounds, so no voice says 'my-NEWT' (as in tiny)
+const minnit = t => t.replace(/\bminutes\b/g, 'minnits').replace(/\bminute\b/g, 'minnit');
 function say(text) {
   if (!S.sound || !('speechSynthesis' in window)) return;
   try {
     speechSynthesis.cancel();
-    const u = new SpeechSynthesisUtterance(text.replace(/<[^>]+>/g, ''));
+    const u = new SpeechSynthesisUtterance(minnit(text.replace(/<[^>]+>/g, '')));
     const vs = speechSynthesis.getVoices();
     const v = ['Kate', 'Serena', 'Martha', 'Stephanie', 'Google UK English Female', 'Fiona', 'Moira'].map(n => vs.find(x => x.name.includes(n))).find(Boolean)
       || vs.find(x => /en[-_]GB/i.test(x.lang));
@@ -349,7 +374,9 @@ function confetti(n = 40) {
   const cols = ['#ff5c9a', '#8a5cf6', '#ffd23d', '#3d7bff', '#2fbf71'];
   for (let i = 0; i < n; i++) {
     const c = document.createElement('div'); c.className = 'confetti';
-    c.style.left = Math.random() * 100 + 'vw'; c.style.background = pick(cols);
+    c.style.left = Math.random() * 100 + 'vw';
+    if (Math.random() < 0.45) { c.textContent = pick(['⭐', '💖', '✨', '🌸', '💜', '🦋']); c.style.cssText += 'background:none;width:auto;height:auto;font-size:' + (16 + rand(14)) + 'px'; }
+    else c.style.background = pick(cols);
     document.body.appendChild(c);
     c.animate([{ transform: `translateY(0) rotate(0)` }, { transform: `translateY(${innerHeight + 40}px) rotate(${rand(720)}deg)` }],
       { duration: 1400 + rand(1200), easing: 'cubic-bezier(.3,.6,.6,1)', delay: rand(300) }).onfinish = () => c.remove();
@@ -369,7 +396,7 @@ function toast(msg) { const t = $('#toast'); t.innerHTML = msg; t.classList.add(
 // ---------- the doll ----------
 function renderDoll(mood) {
   $('#doll').innerHTML = dollSVG(S.look);
-  if (mood) { const d = $('#doll'); d.classList.remove('happy', 'sad'); void d.offsetWidth; d.classList.add(mood); if (mood === 'happy') setTimeout(sfx.boing, 120); }
+  if (mood) { const d = $('#doll'); d.classList.remove('happy', 'sad'); void d.offsetWidth; d.classList.add(mood); if (mood === 'happy') setTimeout(() => (Math.random() < 0.4 && sfx.yay()) || sfx.boing(), 120); }
 }
 function renderTop() {
   $('#stars').textContent = `⭐ ${S.stars}`;
@@ -583,7 +610,7 @@ function wear(it) {
   } else if (['top', 'bottom'].includes(it.cat)) { L[it.cat] = it.id; L.dress = null; }
   else if (CATS.find(c => c.key === it.cat).optional && L[it.cat] === it.id) L[it.cat] = null;   // tap again to take it off
   else L[it.cat] = it.id;
-  save(); renderDoll(); renderWardrobe();
+  save(); sfx.wear(); renderDoll(); renderWardrobe();
 }
 $('#panel').addEventListener('click', e => {
   audio();
@@ -634,8 +661,10 @@ function layout() { document.body.classList.toggle('portrait', innerHeight > inn
 addEventListener('resize', layout);
 layout();
 renderDoll(); renderTop(); newQuestion();
+for (let i = 0; i < 9; i++) { const t = document.createElement('div'); t.className = 'twinkle'; t.textContent = pick(['✨', '⭐', '💫']); t.style.left = 6 + rand(86) + '%'; t.style.top = 4 + rand(80) + '%'; t.style.animationDelay = (i * 0.4) + 's'; $('#stage').appendChild(t); }
 if (!S.started) { $('#nameIn').value = S.name; $('#welcome').classList.add('show'); }
-document.addEventListener('pointerdown', () => { audio(); startMusic(); }, { once: true });
+document.addEventListener('pointerdown', () => { audio(); startMusic(); }, true);
+document.addEventListener('visibilitychange', () => { if (!document.hidden && AC && AC.state !== 'running') AC.resume(); });
 window.__ttb = { get S() { return S; }, get Q() { return Q; } };
 </script>
 </body>

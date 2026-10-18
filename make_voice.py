@@ -26,7 +26,7 @@ SETTINGS = {'stability': 0.45, 'similarity_boost': 0.8, 'style': 0.35, 'use_spea
 def call(path, body=None):
     req = urllib.request.Request(API + path, data=json.dumps(body).encode() if body else None,
                                  headers={'xi-api-key': KEY, 'Content-Type': 'application/json'})
-    with urllib.request.urlopen(req, timeout=60, context=CTX) as r:
+    with urllib.request.urlopen(req, timeout=240, context=CTX) as r:
         return r.read()
 
 
@@ -61,6 +61,26 @@ if __name__ == '__main__':
         L = lines()
         for k in ['hello', 't-4-45', 'got-gown']:
             tts(sys.argv[2], L[k], out / f'{sys.argv[2][:6]}-{k}.mp3'); print('recorded', k, ':', L[k])
+    elif cmd == 'fx':
+        out = HERE / 'voice'; out.mkdir(exist_ok=True)
+        FX = {
+            'fx-correct': ('a magical harp glissando with sparkling chimes, happy and bright', 1.6),
+            'fx-wrong': ('a soft, cute cartoon descending boop, gentle and friendly, not scary', 1.0),
+            'fx-star': ('a short bright fairy dust twinkle sparkle', 0.8),
+            'fx-buy': ('a cash register cha-ching with magical sparkles', 1.4),
+            'fx-wear': ('a quick fabric swish of a twirling dress with a soft sparkle', 0.9),
+            'fx-level': ('a short triumphant magical fanfare with sparkles and a little crowd cheering', 3.0),
+            'fx-yay': ('a happy little girl cheering yay, short and joyful', 1.0),
+        }
+        for k, (prompt, secs) in FX.items():
+            f = out / f'{k}.mp3'
+            if f.exists(): continue
+            f.write_bytes(call('/sound-generation', {'text': prompt, 'duration_seconds': secs, 'prompt_influence': 0.5})); print('fx', k)
+        f = out / 'music.mp3'
+        if not f.exists():
+            f.write_bytes(call('/music', {'prompt': "A seamless looping instrumental for a children's princess dress-up game: gentle, sparkly and magical, music box, celesta, harp, glockenspiel and soft strings, happy and dreamy, moderate tempo, no vocals", 'music_length_ms': 60000}))
+            print('music')
+        (out / 'manifest.json').write_text(json.dumps(sorted(p.stem for p in out.glob('*.mp3') if p.stat().st_size > 1000)))
     elif cmd == 'all':
         out = HERE / 'voice'; out.mkdir(exist_ok=True)
         L = lines()
