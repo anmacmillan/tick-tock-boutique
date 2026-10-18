@@ -471,7 +471,7 @@ function stopMusic() { clearInterval(musicTimer); musicTimer = null; if (musicSr
 // Recorded voice clips (voice/<key>.mp3, listed in voice/manifest.json) are used
 // when they exist; anything not recorded falls back to the iPad's own voice.
 let CLIPS = new Set(); const BUF = new Map();
-fetch('voice/manifest.json', { cache: 'no-store' }).then(r => r.ok ? r.json() : []).then(k => { CLIPS = new Set(k); }).catch(() => {});
+const CLIPS_READY = fetch('voice/manifest.json', { cache: 'no-store' }).then(r => r.ok ? r.json() : []).then(k => { CLIPS = new Set(k); }).catch(() => {});
 async function clip(key) {
   if (BUF.has(key)) return BUF.get(key);
   const ac = audio(); if (!ac) return null;
@@ -481,16 +481,26 @@ async function clip(key) {
 let voiceGen = 0;
 async function voice(keys, text) {
   if (!S.sound) return;
-  if (!keys.length || !keys.every(k => CLIPS.has(k))) return say(text);
-  const id = ++voiceGen; try { speechSynthesis.cancel(); } catch (e) {}
+  await CLIPS_READY;
+  const missing = keys.filter(k => !CLIPS.has(k));
+  if (missing.length) console.warn('[voice] no recording for', missing.join(', '));
+  keys = keys.filter(k => CLIPS.has(k));
+  if (!keys.length) return;           // never the iPad's robot voice: only Jessica (and the Flemish teacher)
+  const id = ++voiceGen;
   const bufs = await Promise.all(keys.map(clip));
-  if (id !== voiceGen || bufs.some(b => !b)) return id === voiceGen ? say(text) : null;
+  if (id !== voiceGen || bufs.some(b => !b)) return;
   if (MUSIC) MUSIC.gain.setTargetAtTime(0.2, AC.currentTime, 0.1);
   let t = AC.currentTime + 0.05;
   for (const b of bufs) { const src = AC.createBufferSource(); src.buffer = b; src.connect(AC.destination); src.start(t); t += b.duration + 0.08; }
   setTimeout(() => { if (MUSIC && id === voiceGen) MUSIC.gain.setTargetAtTime(0.55, AC.currentTime, 0.4); }, (t - AC.currentTime) * 1000);
 }
 const timeKey = (h, m) => (m % 5 === 0 ? `${NL() ? 'nl-' : ''}t-${h}-${m}` : null);
+// any time at all, said with recorded pieces: "seventeen minnits past" + "three."
+function timeClips(h, m) {
+  if (m % 5 === 0 || NL()) return [timeKey(h, m)];
+  return m < 30 ? [`mp-${m}`, `hr-${h}`] : [`mt-${60 - m}`, `hr-${nextH(h)}`];
+}
+const periodClip = h24 => (h24 < 12 ? 'per-am' : h24 < 18 ? 'per-pm' : 'per-eve');
 const CHEERS = ['Brilliant!', 'Yes!', 'Well done!', 'Super!', 'Amazing!', 'You got it!'];
 const CHEERS_NL = ['Goed zo!', 'Super!', 'Knap gedaan!', 'Prima!', 'Fantastisch!', 'Helemaal juist!'];
 const TXT = {
@@ -507,6 +517,14 @@ window.__ttbLines = () => {
   for (let h = 1; h <= 12; h++) for (let m = 0; m < 60; m += 5) L[`t-${h}-${m}`] = phrase(h, m) + '.';
   CHEERS.forEach((c, i) => { L[`cheer-${i}`] = c; });
   L.nq = 'Not quite! Look at the hands.';
+  // every-minute and 24-hour times, in pieces
+  const W = ['', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten', 'eleven', 'twelve', 'thirteen', 'fourteen', 'fifteen', 'sixteen', 'seventeen', 'eighteen', 'nineteen', 'twenty', 'twenty-one', 'twenty-two', 'twenty-three', 'twenty-four', 'twenty-five', 'twenty-six', 'twenty-seven', 'twenty-eight', 'twenty-nine'];
+  for (let m = 1; m < 30; m++) if (m % 5) { L[`mp-${m}`] = `${W[m]} ${m === 1 ? 'minute' : 'minutes'} past`; L[`mt-${m}`] = `${W[m]} ${m === 1 ? 'minute' : 'minutes'} to`; }
+  for (let h = 1; h <= 12; h++) L[`hr-${h}`] = `${W[h]}.`;
+  L['per-am'] = 'in the morning.'; L['per-pm'] = 'in the afternoon.'; L['per-eve'] = 'in the evening.';
+  L['x24-am'] = 'In the morning, the twenty-four hour clock is just the same as the normal clock.';
+  L['x24-pm'] = 'After twelve noon, add twelve to the hour.';
+  L.bye = 'Everything is saved. See you next time, superstar!';
   L.bonus = 'Five in a row! A bonus star!';
   L.level = 'Hooray! A brand new level!';
   L.need = "You need a few more stars. Let's read some clocks!";
@@ -516,6 +534,7 @@ window.__ttbLines = () => {
   for (let h = 1; h <= 12; h++) for (let m = 0; m < 60; m += 5) L[`nl-t-${h}-${m}`] = phraseNL(h, m) + '.';
   CHEERS_NL.forEach((c, i) => { L[`nl-cheer-${i}`] = c; });
   L['nl-nq'] = 'Bijna! Kijk goed naar de wijzers.';
+  L['nl-bye'] = 'Alles is bewaard. Tot de volgende keer, superster!';
   L['nl-bonus'] = 'Vijf op een rij! Extra sterren!';
   L['nl-hello'] = `Welkom in Klokkenland, ${S.name}! Hier leren we de klok in het Nederlands, en je krijgt dubbele sterren.`;
   LEVELS_NL.forEach((l, i) => { L[`nl-lesson-${i + 1}`] = l.text.join(' ').replace(/<[^>]+>/g, ''); });
@@ -528,6 +547,7 @@ window.__ttbLines = () => {
 // spelt as it sounds, so no voice says 'my-NEWT' (as in tiny)
 const minnit = t => t.replace(/\bminutes\b/g, 'minnits').replace(/\bminute\b/g, 'minnit');
 function say(text) {
+  return;            // retired: only the recorded ElevenLabs voices are used
   if (!S.sound || !('speechSynthesis' in window)) return;
   try {
     speechSynthesis.cancel();
@@ -732,8 +752,7 @@ async function answer(ok, el) {
     const ci = rand(CHEERS.length), cheer = (NL() ? CHEERS_NL : CHEERS)[ci];
     const said = Q.h24 !== undefined ? `${phrase(Q.h, Q.m)} ${PERIOD(Q.h24)[1]}` : phrase(Q.h, Q.m);
     fb.innerHTML = `<div class="explain good">${cheer} ${NL() ? 'Het is' : "It's"} <b>${said}</b> (${Q.h24 !== undefined ? d24(Q.h24, Q.m) : digital(Q.h, Q.m)}).${bonus ? (NL() ? ' 🎉 Vijf op een rij: extra sterren!' : ' 🎉 Five in a row: a bonus star!') : ''}</div>`;
-    const tk = Q.h24 === undefined && timeKey(Q.h, Q.m);   // every-minute and 24-hour times use the iPad voice
-    voice(tk ? [VK(`cheer-${ci}`), tk, ...(bonus ? [VK('bonus')] : [])] : [], `${cheer} ${said}`);
+    voice([VK(`cheer-${ci}`), ...timeClips(Q.h, Q.m), ...(Q.h24 !== undefined ? [periodClip(Q.h24)] : []), ...(bonus ? [VK('bonus')] : [])], '');
     renderTop();
     await sleep(1700);
     const L = LEVELS[S.level - 1];
@@ -755,7 +774,7 @@ async function answer(ok, el) {
     S.streak = 0; save(); sfx.bad(); renderDoll('sad');
     const ex = Q.h24 !== undefined ? explain24(Q.h24, Q.m) : explain(Q.h, Q.m);
     fb.innerHTML = `<div class="explain">${ex}</div><div class="row"><button class="big" id="nextBtn">${T('next')}</button></div>`;
-    if (Q.h24 === undefined && CLIPS.has(VK('nq')) && CLIPS.has(timeKey(Q.h, Q.m) || '-')) voice([VK('nq'), timeKey(Q.h, Q.m)], ''); else say(`${T('notquite')} ${ex}`);
+    voice(Q.h24 !== undefined ? [VK('nq'), Q.h24 < 12 ? 'x24-am' : 'x24-pm', ...timeClips(Q.h, Q.m), periodClip(Q.h24)] : [VK('nq'), ...timeClips(Q.h, Q.m)], '');
     if (Q.type === 'set') {         // show the right answer on the clock
       Q.t = (Q.h % 12) * 60 + Q.m; const svg = $('#setClock');
       svg.outerHTML = clockSVG(Q.h, Q.m, { hint: hintOn, id: 'setClock' });
@@ -905,7 +924,7 @@ document.querySelectorAll('.tab').forEach(t => t.addEventListener('click', () =>
 $('#exitBtn').addEventListener('click', () => {
   save(); cloudSave(); sfx.ding();
   $('#byeText').innerHTML = `⭐ ${S.stars} stars &nbsp;·&nbsp; 🏆 ${finished()} of ${TOTAL_LEVELS} levels<br>Everything is saved, so you can close the game now.<br>See you next time, ${esc(S.name)}!<br><small style="color:#9a86ad">Save code: <b>${S.code}</b></small>`;
-  $('#byeOv').classList.add('show'); voice(['nl-bye'].filter(() => NL()), NL() ? 'Alles is bewaard. Tot de volgende keer!' : 'Everything is saved. See you next time!');
+  $('#byeOv').classList.add('show'); voice([NL() ? 'nl-bye' : 'bye'], NL() ? 'Alles is bewaard. Tot de volgende keer!' : 'Everything is saved. See you next time!');
 });
 $('#byeBtn').addEventListener('click', () => $('#byeOv').classList.remove('show'));
 $('#soundBtn').addEventListener('click', () => { S.sound = !S.sound; save(); renderTop(); });
@@ -926,7 +945,7 @@ if (S.refund) { const n = S.refund; setTimeout(() => toast(`👑 Welcome to the 
 document.addEventListener('pointerdown', () => { audio(); startMusic(); }, true);
 document.addEventListener('visibilitychange', () => { if (!document.hidden && AC && AC.state !== 'running') AC.resume(); });
 cloudSave();   // make sure the cloud has her from the first moment
-window.__ttb = { get S() { return S; }, get Q() { return Q; } };
+window.__ttb = { get S() { return S; }, get Q() { return Q; }, answer: ok => answer(ok, document.body), newQuestion: () => newQuestion(), timeClips: (h, m) => timeClips(h, m) };
 </script>
 </body>
 </html>
