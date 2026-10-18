@@ -110,6 +110,12 @@
   /* overlays */
   .overlay { position: fixed; inset: 0; z-index: 30; background: rgba(59,36,80,.45); display: none; align-items: center; justify-content: center; padding: 16px; }
   .overlay.show { display: flex; }
+  .pweek { display: flex; gap: 6px; justify-content: center; align-items: flex-end; height: 110px; margin: 10px 0 2px; }
+  .pbar { width: 34px; height: 100%; display: flex; flex-direction: column; justify-content: flex-end; align-items: center; position: relative; }
+  .pfill { width: 100%; background: linear-gradient(#ff9ccf, #b57cff); border-radius: 8px 8px 3px 3px; min-height: 3px; }
+  .pbar small { position: absolute; top: -2px; font-size: 12px; color: #7a5a92; } .pbar span { font-size: 12px; color: #9a86ad; margin-top: 3px; }
+  .pnote { font-size: 13px; color: #9a86ad; } .rc-line { font-size: 19px; }
+  .big.ghost { background: #fff; color: #b0458a; box-shadow: 0 4px 0 #f0c6dd; border: 2px solid #f6b6d8; }
   .card { background: #fff; border-radius: 28px; padding: 22px; width: min(520px, 100%); max-height: 100%; overflow-y: auto; text-align: center; box-shadow: 0 10px 0 #f0c6dd; }
   .card h2 { color: var(--pink); font-size: 28px; margin-bottom: 6px; }
   .card p { font-size: 19px; line-height: 1.45; margin: 8px 0; }
@@ -134,6 +140,7 @@
     </div>
     <div class="stars" id="tally" title="Levels finished">🏆 0/10</div>
     <div class="stars" id="stars">⭐ 0</div>
+    <button class="icon" id="progressBtn" title="My progress">🌟</button>
     <button class="icon" id="exitBtn" title="Save and exit">💾</button>
     <button class="icon" id="musicBtn" title="Music">🎵</button>
     <button class="icon" id="soundBtn" title="Sound">🔊</button>
@@ -159,6 +166,7 @@
   <p id="byeText"></p>
   <div class="row"><button class="big" id="byeBtn">Keep playing</button></div>
 </div></div>
+<div class="overlay" id="progOv"><div class="card" id="progCard"></div></div>
 <div class="overlay" id="lessonOv"><div class="card" id="lessonCard"></div></div>
 <div id="toast"></div>
 
@@ -203,6 +211,7 @@ if (S.p) S.p = asObj(S.p);
 S.code = S.code || Array.from(crypto.getRandomValues(new Uint8Array(6)), b => CODE_CHARS[b % CODE_CHARS.length]).join('');
 let cloudTimer = null, cloudDirty = false;
 function cloudSave() {
+  try { savePointer(); } catch (e) {}
   clearTimeout(cloudTimer); cloudTimer = null; cloudDirty = false;
   try { fetch(CLOUD + S.code + '.json', { method: 'PUT', body: JSON.stringify(S), keepalive: true }).catch(() => { cloudDirty = true; }); } catch (e) { cloudDirty = true; }
 }
@@ -525,6 +534,22 @@ window.__ttbLines = () => {
   L['x24-am'] = 'In the morning, the twenty-four hour clock is just the same as the normal clock.';
   L['x24-pm'] = 'After twelve noon, add twelve to the hour.';
   L.bye = 'Everything is saved. See you next time, superstar!';
+  // the progress recap
+  const NW = ['zero', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten', 'eleven', 'twelve', 'thirteen', 'fourteen', 'fifteen', 'sixteen', 'seventeen', 'eighteen', 'nineteen'];
+  const TW = ['', '', 'twenty', 'thirty', 'forty', 'fifty', 'sixty', 'seventy', 'eighty', 'ninety'];
+  const nw = n => n < 20 ? NW[n] : n < 100 ? TW[Math.floor(n / 10)] + (n % 10 ? '-' + NW[n % 10] : '') : NW[Math.floor(n / 100)] + ' hundred' + (n % 100 ? ' and ' + nw(n % 100) : '');
+  for (let n = 1; n <= 250; n++) L[`num-${n}`] = nw(n);
+  for (const [k, w] of Object.entries(CAT_WORDS)) L[`cat-${k}`] = w + '.';
+  Object.assign(L, {
+    'rc-welcome-margot': 'Welcome back, Margot!', 'rc-welcome': 'Welcome back, superstar!',
+    'rc-last': 'Last time, you read', 'rc-tonight': 'Tonight, you read', 'rc-clocks': 'clocks, and got', 'rc-right': 'right!',
+    'rc-allright': 'Every single one! Amazing!', 'rc-total': 'So far, you have read', 'rc-correct': 'clocks correctly!',
+    'rc-sofar': 'You have finished', 'rc-levels': 'levels, and you have', 'rc-level1': 'level, and you have', 'rc-stars': 'stars!', 'rc-lots': 'lots and lots of',
+    'rc-best': 'You are really good at', 'rc-practise': 'Something lovely to practise next:',
+    'rc-proud': "I'm so proud of how hard you are working. Let's read some clocks!",
+    'rc-proud-bye': "I'm so proud of how hard you worked!",
+    'rc-now': 'This time, you have read', 'rc-today': 'Today, you read',
+  });
   L.bonus = 'Five in a row! A bonus star!';
   L.level = 'Hooray! A brand new level!';
   L.need = "You need a few more stars. Let's read some clocks!";
@@ -741,7 +766,7 @@ function explain24(h24, m) {
     : `${ic} After 12 noon, <b>add 12</b>: ${h} + 12 = ${h24}. So <b>${phrase(h, m)} ${per}</b> is <b>${d24(h24, m)}</b>.`;
 }
 async function answer(ok, el) {
-  answered = true;
+  answered = true; noteAnswer(ok);
   const fb = $('#feedback');
   if (ok) {
     S.total++; S.streak++;
@@ -923,10 +948,10 @@ document.querySelectorAll('.tab').forEach(t => t.addEventListener('click', () =>
 }));
 $('#exitBtn').addEventListener('click', () => {
   save(); cloudSave(); sfx.ding();
-  $('#byeText').innerHTML = `⭐ ${S.stars} stars &nbsp;·&nbsp; 🏆 ${finished()} of ${TOTAL_LEVELS} levels<br>Everything is saved, so you can close the game now.<br>See you next time, ${esc(S.name)}!<br><small style="color:#9a86ad">Save code: <b>${S.code}</b></small>`;
-  $('#byeOv').classList.add('show'); voice([NL() ? 'nl-bye' : 'bye'], NL() ? 'Alles is bewaard. Tot de volgende keer!' : 'Everything is saved. See you next time!');
+  showProgress('tonight'); voice([...recapClips('tonight'), NL() ? 'nl-bye' : 'bye'], '');
 });
 $('#byeBtn').addEventListener('click', () => $('#byeOv').classList.remove('show'));
+$('#progressBtn').addEventListener('click', () => { audio(); showProgress('now'); voice(recapClips('now'), ''); });
 $('#soundBtn').addEventListener('click', () => { S.sound = !S.sound; save(); renderTop(); });
 $('#musicBtn').addEventListener('click', () => { S.music = !S.music; save(); renderTop(); if (S.music) startMusic(); else stopMusic(); });
 $('#goBtn').addEventListener('click', () => {
@@ -935,12 +960,102 @@ $('#goBtn').addEventListener('click', () => {
   $('#welcome').classList.remove('show'); renderTop();
   if (!S.seen[S.level]) showLesson(S.level);
 });
+
+// ---------- 🌟 progress: every session is remembered, and Jessica gives a kind recap ----------
+// S.sess: [{ d: start time, r: right, w: not yet, c: { 'en-3': [r, w] } }], S.skill: { 'en-3': [r, w] } for all time
+const catKey = () => `${NL() ? 'nl' : 'en'}-${Q.lv || S.level}`;
+const CAT_WORDS = { 'en-1': "o'clock times", 'en-2': 'half past', 'en-3': 'quarter past and quarter to', 'en-4': 'the five-minute times', 'en-5': 'the twenty-four hour clock', 'en-6': 'every-minute times',
+  'nl-1': "Dutch o'clock times", 'nl-2': 'Dutch half past', 'nl-3': 'Dutch quarter past and quarter to', 'nl-4': 'the Dutch five-minute times' };
+const CAT_LABEL = k => { const [w, n] = k.split('-'); const L = (w === 'nl' ? LEVELS_NL : LEVELS_EN)[n - 1]; return L ? (w === 'nl' ? '🇧🇪 ' : '') + L.name : k; };
+function session() {
+  S.sess = Array.isArray(S.sess) ? S.sess : Object.values(asObj(S.sess));
+  const last = S.sess[S.sess.length - 1];
+  if (last && Date.now() - (last.e || last.d) < 2 * 3600e3) return last;      // the same sitting
+  const s = { d: Date.now(), e: Date.now(), r: 0, w: 0, c: {} };
+  S.sess.push(s); S.sess = S.sess.slice(-60);
+  return s;
+}
+function noteAnswer(ok) {
+  const s = session(), k = catKey();
+  s.e = Date.now(); s[ok ? 'r' : 'w']++;
+  s.c = asObj(s.c); s.c[k] = s.c[k] || [0, 0]; s.c[k][ok ? 0 : 1]++;
+  S.skill = asObj(S.skill); S.skill[k] = S.skill[k] || [0, 0]; S.skill[k][ok ? 0 : 1]++;
+}
+function bestAndPractise() {
+  const sk = Object.entries(asObj(S.skill)).filter(([k]) => CAT_WORDS[k]);
+  const acc = ([, [r, w]]) => r / Math.max(1, r + w);
+  const best = sk.filter(([, [r, w]]) => r >= 3 && acc([0, [r, w]]) >= 0.7).sort((a, b) => b[1][0] - a[1][0])[0];
+  const prac = sk.filter(([, [r, w]]) => w >= 2 && r + w >= 4).sort((a, b) => acc(a) - acc(b))[0];
+  // before the tracking began: what she has done most is what she's good at, and her current level is next
+  let bestK = best ? best[0] : null;
+  if (!bestK) { const en = asObj((S.world === 'nl' ? S.en && S.en.right : S.right) || {}); const top = Object.entries(en).sort((a, b) => b[1] - a[1])[0]; if (top && top[1] >= 3) bestK = 'en-' + top[0]; }
+  const curK = `${NL() ? 'nl' : 'en'}-${S.level}`;
+  const pracK = prac && prac[0] !== bestK ? prac[0] : curK !== bestK ? curK : null;
+  return { bestK, pracK };
+}
+const num = n => n >= 1 && n <= 250 ? `num-${n}` : 'rc-lots';
+function recapClips(kind) {
+  const all = (S.sess || []).filter(s => s.r + s.w > 0);
+  const s = all[all.length - 1];
+  const out = [S.name === 'Margot' ? 'rc-welcome-margot' : 'rc-welcome'];
+  if (kind !== 'welcome') out.length = 0;
+  if (s) {
+    out.push(kind === 'tonight' ? (new Date().getHours() >= 17 ? 'rc-tonight' : 'rc-today') : kind === 'now' ? 'rc-now' : 'rc-last', num(s.r + s.w), 'rc-clocks', num(s.r), 'rc-right');
+    if (s.w === 0 && s.r >= 3) out.push('rc-allright');
+  } else if (S.total) out.push('rc-total', num(S.total), 'rc-correct');
+  const lv = finished();
+  if (lv) out.push('rc-sofar', num(lv), lv === 1 ? 'rc-level1' : 'rc-levels', num(S.stars), 'rc-stars');
+  const { bestK, pracK } = bestAndPractise();
+  if (bestK) out.push('rc-best', `cat-${bestK}`);
+  if (pracK) out.push('rc-practise', `cat-${pracK}`);
+  out.push(kind === 'tonight' ? 'rc-proud-bye' : 'rc-proud');
+  return out;
+}
+function progressHTML(kind) {
+  const all = (S.sess || []).filter(s => s.r + s.w > 0);
+  const s = all[all.length - 1];
+  const { bestK, pracK } = bestAndPractise();
+  // the last seven days, as little bars of clocks read
+  const days = [...Array(7)].map((_, i) => { const d = new Date(); d.setHours(0, 0, 0, 0); d.setDate(d.getDate() - 6 + i); return d; });
+  const per = days.map(d => all.filter(x => x.d >= d.getTime() && x.d < d.getTime() + 864e5).reduce((t, x) => t + x.r + x.w, 0));
+  const max = Math.max(5, ...per);
+  const bars = days.map((d, i) => `<div class="pbar"><div class="pfill" style="height:${Math.round(per[i] / max * 100)}%"></div><small>${per[i] || ''}</small><span>${d.toLocaleDateString('en-GB', { weekday: 'short' }).slice(0, 2)}</span></div>`).join('');
+  const line = s ? `${kind === 'tonight' ? (new Date().getHours() >= 17 ? 'Tonight' : 'Today') : kind === 'now' ? 'This time' : 'Last time'} you read <b>${s.r + s.w} clocks</b> and got <b>${s.r} right</b>${s.w === 0 && s.r >= 3 ? ', every single one! 🎉' : '!'}` : S.total ? `So far you have read <b>${S.total} clocks</b> correctly!` : `Let's read some clocks!`;
+  return `<h2>${kind === 'welcome' ? `Welcome back, ${esc(S.name)}! 🌟` : kind === 'tonight' ? 'All saved! 💾' : `🌟 ${esc(S.name)}'s progress`}</h2>
+    <p class="rc-line">${line}</p>
+    <p>⭐ <b>${S.stars}</b> stars &nbsp;·&nbsp; 🏆 <b>${finished()}</b> of ${TOTAL_LEVELS} levels &nbsp;·&nbsp; ⏰ <b>${S.total}</b> clocks right in all</p>
+    ${bestK ? `<p>💪 Really good at: <b>${esc(CAT_LABEL(bestK))}</b></p>` : ''}
+    ${pracK ? `<p>🌱 Lovely to practise next: <b>${esc(CAT_LABEL(pracK))}</b></p>` : ''}
+    <div class="pweek">${bars}</div><p class="pnote">Clocks read each day this week</p>`;
+}
+function showProgress(kind) {
+  $('#progCard').innerHTML = progressHTML(kind) + `<div class="row"><button class="big" id="progBtn">${kind === 'tonight' ? 'Keep playing' : "Let's play!"}</button><button class="big ghost" id="progSay">🔊 Listen</button></div>` +
+    (kind === 'tonight' ? `<p class="pnote">Everything is saved, so you can close the game now. Save code: <b>${S.code}</b></p>` : '');
+  $('#progOv').classList.add('show');
+  $('#progBtn').onclick = () => { voiceGen++; $('#progOv').classList.remove('show'); };
+  $('#progSay').onclick = () => { audio(); voice(recapClips(kind), ''); };
+  progKind = kind;
+}
+let progKind = null, recapSaid = false;
+// the welcome recap is spoken on her first tap (iPads only allow sound after a tap)
+document.addEventListener('pointerdown', () => {
+  if (recapSaid || !$('#progOv').classList.contains('show') || progKind !== 'welcome') return;
+  recapSaid = true; setTimeout(() => voice(recapClips('welcome'), ''), 150);
+}, true);
+// a pointer so Dad (or a new iPad) can always find her save: wcp/TTBKIDS/<name> -> her save code
+function savePointer() {
+  const k = (S.name || '').toLowerCase().replace(/[^a-z]/g, '');
+  if (!k) return;
+  try { fetch(CLOUD.replace('/ttb/', '/wcp/TTBKIDS/') + k + '.json', { method: 'PUT', body: JSON.stringify({ code: S.code, t: Date.now(), name: S.name, stars: S.stars, total: S.total }) }).catch(() => {}); } catch (e) {}
+}
+
 function layout() { document.body.classList.toggle('portrait', innerHeight > innerWidth * 1.05); }
 addEventListener('resize', layout);
 layout();
 renderDoll(); renderTop(); newQuestion();
 for (let i = 0; i < 9; i++) { const t = document.createElement('div'); t.className = 'twinkle'; t.textContent = pick(['✨', '⭐', '💫']); t.style.left = 6 + rand(86) + '%'; t.style.top = 4 + rand(80) + '%'; t.style.animationDelay = (i * 0.4) + 's'; $('#stage').appendChild(t); }
 if (!S.started) { $('#nameIn').value = S.name; $('#welcome').classList.add('show'); }
+else if ((S.sess || []).some(x => x.r + x.w > 0) || S.total > 0) showProgress('welcome');
 if (S.refund) { const n = S.refund; setTimeout(() => toast(`👑 Welcome to the new Princess Boutique! Your ${n} stars from old clothes are back to spend.`), 800); S.refund = 0; save(); }
 document.addEventListener('pointerdown', () => { audio(); startMusic(); }, true);
 document.addEventListener('visibilitychange', () => { if (!document.hidden && AC && AC.state !== 'running') AC.resume(); });
