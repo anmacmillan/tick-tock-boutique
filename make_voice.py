@@ -7,11 +7,17 @@
 The API key is read from ~/.elevenlabs_key and never printed.
 The lines come from the game itself (window.__ttbLines), so they always match.
 """
-import json, os, sys, time, urllib.request
+import json, os, ssl, sys, time, urllib.request
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 KEY = (Path.home() / '.elevenlabs_key').read_text().strip()
+if not KEY.startswith('sk_') and ' ' in KEY:
+    sys.exit("~/.elevenlabs_key doesn't hold an API key (it holds some other text). Copy the key again and re-save it.")
+try:
+    import certifi; CTX = ssl.create_default_context(cafile=certifi.where())   # this Mac's Python lacks the system certificates
+except ImportError:
+    CTX = ssl.create_default_context()
 API = 'https://api.elevenlabs.io/v1'
 MODEL = 'eleven_multilingual_v2'
 SETTINGS = {'stability': 0.45, 'similarity_boost': 0.8, 'style': 0.35, 'use_speaker_boost': True}
@@ -20,7 +26,7 @@ SETTINGS = {'stability': 0.45, 'similarity_boost': 0.8, 'style': 0.35, 'use_spea
 def call(path, body=None):
     req = urllib.request.Request(API + path, data=json.dumps(body).encode() if body else None,
                                  headers={'xi-api-key': KEY, 'Content-Type': 'application/json'})
-    with urllib.request.urlopen(req, timeout=60) as r:
+    with urllib.request.urlopen(req, timeout=60, context=CTX) as r:
         return r.read()
 
 
