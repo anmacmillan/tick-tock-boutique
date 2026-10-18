@@ -7,7 +7,7 @@ export function shade(hex, f) {
   return '#' + [(n >> 16) & 255, (n >> 8) & 255, n & 255].map(v => c(v).toString(16).padStart(2, '0')).join('');
 }
 const sparkles = (pts, col = '#fff') => pts.map(([x, y, r = 3]) =>
-  `<path d="M${x} ${y - r * 2}L${x + r * .6} ${y - r * .6}L${x + r * 2} ${y}L${x + r * .6} ${y + r * .6}L${x} ${y + r * 2}L${x - r * .6} ${y + r * .6}L${x - r * 2} ${y}L${x - r * .6} ${y - r * .6}Z" fill="${col}" opacity=".9"/>`).join('');
+  `<path d="M${x} ${y - r * 2}L${x + r * .6} ${y - r * .6}L${x + r * 2} ${y}L${x + r * .6} ${y + r * .6}L${x} ${y + r * 2}L${x - r * .6} ${y + r * .6}L${x - r * 2} ${y}L${x - r * .6} ${y - r * .6}Z" fill="${col}" opacity=".9" data-flat="1"/>`).join('');
 const TEE = 'M120 200 Q150 191 180 200 L194 236 L180 241 L177 302 L123 302 L120 241 L106 236 Z';
 
 // ---------- categories, in the order they show in the wardrobe ----------
@@ -139,9 +139,10 @@ export const ITEMS = [
 export const BY_ID = Object.fromEntries(ITEMS.map(i => [i.id, i]));
 
 // ---------- hair ----------
+const strands = (list, col) => list.map(([x1, y1, x2, y2]) => `<path d="M${x1} ${y1} Q${(x1 + x2) / 2 + (x1 < 150 ? -6 : 6)} ${(y1 + y2) / 2} ${x2} ${y2}" fill="none" stroke="${col}" stroke-width="2" opacity=".55" stroke-linecap="round"/>`).join('');
 function hairBack(style, c) {
   const d = shade(c, .82);
-  if (style === 'long') return `<path d="M84 122 Q80 38 150 40 Q220 38 216 122 L224 272 Q150 292 76 272 Z" fill="${c}"/>`;
+  if (style === 'long') return `<path d="M84 122 Q80 38 150 40 Q220 38 216 122 L224 272 Q150 292 76 272 Z" fill="${c}"/>` + strands([[92, 140, 86, 264], [104, 150, 100, 276], [196, 150, 200, 276], [208, 140, 214, 264]], d);
   if (style === 'bob') return `<path d="M82 128 Q80 40 150 42 Q220 40 218 128 L216 188 Q150 202 84 188 Z" fill="${c}"/>`;
   if (style === 'pigtails') return `<circle cx="74" cy="150" r="26" fill="${c}"/><circle cx="226" cy="150" r="26" fill="${c}"/><circle cx="68" cy="190" r="20" fill="${c}"/><circle cx="232" cy="190" r="20" fill="${c}"/><path d="M86 120 Q84 44 150 44 Q216 44 214 120Z" fill="${c}"/><circle cx="90" cy="132" r="6" fill="#ff4d7d"/><circle cx="210" cy="132" r="6" fill="#ff4d7d"/>`;
   if (style === 'bun') return `<circle cx="150" cy="44" r="28" fill="${c}"/><path d="M150 18 Q170 30 166 54" fill="none" stroke="${d}" stroke-width="3"/><path d="M86 120 Q84 44 150 44 Q216 44 214 120Z" fill="${c}"/>`;
@@ -152,11 +153,18 @@ function hairBack(style, c) {
   return '';
 }
 function hairFront(style, c) {
+  const d = shade(c, .78);
+  const shine = `<path d="M108 74 Q150 56 192 74" fill="none" stroke="#fff" stroke-opacity=".42" stroke-width="5" stroke-linecap="round"/><path d="M118 82 Q128 76 136 76" fill="none" stroke="#fff" stroke-opacity=".3" stroke-width="3" stroke-linecap="round"/>`;
+  const shadow = `<path d="M90 116 Q94 52 150 52 Q206 52 210 116 Q190 86 162 92 Q150 78 132 94 Q108 88 90 116Z" fill="#3b2450" opacity=".12" data-flat="1" transform="translate(0 5)"/>`;
+  return shadow + hairFrontShape(style, c, d) + (style === 'curly' ? '' : shine);
+}
+function hairFrontShape(style, c, d) {
   if (style === 'bob') return `<path d="M88 112 Q92 50 150 50 Q208 50 212 112 Q182 88 150 90 Q118 88 88 112Z" fill="${c}"/>`;
   if (style === 'curly') return Array.from({ length: 7 }, (_, i) => `<circle cx="${100 + i * 16.6}" cy="${64 + Math.abs(3 - i) * 4}" r="15" fill="${c}"/>`).join('');
   const fringe = `<path d="M88 112 Q92 48 150 48 Q208 48 212 112 Q190 80 162 86 Q150 72 132 88 Q108 82 88 112Z" fill="${c}"/>`;
-  if (style === 'long') return fringe + `<path d="M88 108 Q78 170 92 214 L104 208 Q96 160 100 116Z M212 108 Q222 170 208 214 L196 208 Q204 160 200 116Z" fill="${c}"/>`;
-  return fringe;
+  const fstrands = `<path d="M132 88 Q128 74 136 58 M162 86 Q168 72 160 56 M112 96 Q112 80 120 66 M188 96 Q190 80 180 66" fill="none" stroke="${d}" stroke-width="2" opacity=".6" stroke-linecap="round"/>`;
+  if (style === 'long') return fringe + fstrands + `<path d="M88 108 Q78 170 92 214 L104 208 Q96 160 100 116Z M212 108 Q222 170 208 214 L196 208 Q204 160 200 116Z" fill="${c}"/>`;
+  return fringe + fstrands;
 }
 
 // ---------- the face ----------
@@ -176,17 +184,20 @@ function face(skin, mk, eyeId) {
       ${eye.star ? sparkles([[x + 3, 122, 2.6]]) : `<ellipse cx="${x + 4}" cy="121" rx="4.2" ry="5" fill="#fff"/>`}
       <circle cx="${x - 4}" cy="134" r="2.2" fill="#fff" opacity=".9"/>
       <path d="M${x - 15} ${118} Q${x} ${104} ${x + 15} ${118}" fill="none" stroke="#2b1d2e" stroke-width="4" stroke-linecap="round"/>
-      <path d="M${x + o * 14} ${117} l${o * 6} -5 M${x + o * 11} ${112} l${o * 4} -6" stroke="#2b1d2e" stroke-width="2.4" stroke-linecap="round"/>`;
+      <path d="M${x + o * 14} ${117} l${o * 6} -5 M${x + o * 11} ${112} l${o * 4} -6" stroke="#2b1d2e" stroke-width="2.4" stroke-linecap="round"/>
+      <path d="M${x - 8} ${143} Q${x} ${146} ${x + 8} ${143}" fill="none" stroke="#2b1d2e" stroke-width="1.4" opacity=".55" stroke-linecap="round"/>`;
   }).join('');
   s += `<path d="M117 99 Q127 94 137 98 M163 98 Q173 94 183 99" fill="none" stroke="#6b4a3a" stroke-width="2.5" stroke-linecap="round"/>`;
   s += `<path d="M147 139 Q150 142 153 139" fill="none" stroke="${shade(skin, .75)}" stroke-width="2.5" stroke-linecap="round"/>`;
+  s += `<ellipse cx="110" cy="149" rx="12" ry="6.5" fill="#ff8fab" opacity=".22"/><ellipse cx="190" cy="149" rx="12" ry="6.5" fill="#ff8fab" opacity=".22"/>`;
+  s += `<circle cx="151" cy="138" r="1.4" fill="#fff" opacity=".7"/>`;
   if (mk.includes('blush')) s += `<circle cx="112" cy="146" r="11" fill="#ff7aa8" opacity=".4"/><circle cx="188" cy="146" r="11" fill="#ff7aa8" opacity=".4"/>`;
   if (mk.includes('freckles')) s += [[108, 140], [116, 146], [104, 148], [192, 140], [184, 146], [196, 148]].map(([x, y]) => `<circle cx="${x}" cy="${y}" r="1.8" fill="#ffd34d"/>`).join('');
   if (mk.includes('star')) s += sparkles([[192, 112, 4]], '#ff4dd2');
   if (mk.includes('whiskers')) s += `<path d="M104 146 L84 142 M104 152 L84 154 M196 146 L216 142 M196 152 L216 154" stroke="#3a3040" stroke-width="2" stroke-linecap="round"/><circle cx="150" cy="140" r="3" fill="#3a3040"/>`;
-  s += lips
-    ? `<path d="M138 151 Q150 166 162 151 Q150 156 138 151Z" fill="${BY_ID[lips].color}"/>`
-    : `<path d="M139 152 Q150 162 161 152" fill="none" stroke="#c0505f" stroke-width="3" stroke-linecap="round"/>`;
+  const lc = lips ? BY_ID[lips].color : '#b8475a';
+  s += `<path d="M139 151 Q150 165 161 151 Q150 155 139 151Z" fill="${lc}"/><path d="M144 157 Q150 161 156 157 Q150 155 144 157Z" fill="#ff8fa3"/>`;
+  if (lips) s += `<path d="M143 153 Q147 155 150 154" fill="none" stroke="#fff" stroke-width="1.2" opacity=".6"/>`;
   return s;
 }
 
@@ -201,13 +212,19 @@ export function dollSVG(look, { viewBox = '0 0 300 500', only = null, cls = '' }
     bg: draw(look.bg),
     wings: draw(look.wings),
     hairBack: hairBack(style, hc),
-    body: `<rect x="131" y="300" width="16" height="142" rx="8" fill="${skin}"/><rect x="153" y="300" width="16" height="142" rx="8" fill="${skin}"/>
-      <path d="M118 208 L96 292 M182 208 L204 292" stroke="${skin}" stroke-width="17" stroke-linecap="round"/>
-      <circle cx="95" cy="296" r="10" fill="${skin}"/><circle cx="205" cy="296" r="10" fill="${skin}"/>
-      <path d="M122 200 Q150 190 178 200 L176 302 L124 302Z" fill="${skin}"/>
-      <rect x="141" y="166" width="18" height="36" rx="6" fill="${shade(skin, .9)}"/>
-      <circle cx="89" cy="128" r="11" fill="${skin}"/><circle cx="211" cy="128" r="11" fill="${skin}"/>
-      <ellipse cx="150" cy="118" rx="62" ry="64" fill="${skin}"/>`,
+    body: `<ellipse cx="150" cy="452" rx="48" ry="8" fill="#3b2450" opacity=".14" data-flat="1"/>
+      <path d="M131 296 L148 296 L147 372 Q147 382 146 390 L145 440 Q139 447 133 441 L132 390 Q130 380 131 370Z" fill="${skin}"/>
+      <path d="M169 296 L152 296 L153 372 Q153 382 154 390 L155 440 Q161 447 167 441 L168 390 Q170 380 169 370Z" fill="${skin}"/>
+      <ellipse cx="137" cy="443" rx="10" ry="5.5" fill="${skin}"/><ellipse cx="163" cy="443" rx="10" ry="5.5" fill="${skin}"/>
+      <path d="M121 206 Q107 211 103 236 L93 286 Q91 296 98 300 Q107 301 108 291 L118 246 Q123 228 129 214Z" fill="${skin}"/>
+      <path d="M179 206 Q193 211 197 236 L207 286 Q209 296 202 300 Q193 301 192 291 L182 246 Q177 228 171 214Z" fill="${skin}"/>
+      <ellipse cx="99" cy="296" rx="9" ry="10.5" fill="${skin}"/><ellipse cx="201" cy="296" rx="9" ry="10.5" fill="${skin}"/>
+      <path d="M118 207 Q150 194 182 207 Q187 222 180 252 L178 302 L122 302 L120 252 Q113 222 118 207Z" fill="${skin}"/>
+      <path d="M141 166 L159 166 L160 205 Q150 211 140 205Z" fill="${shade(skin, .93)}"/>
+      <ellipse cx="88" cy="128" rx="10" ry="13" fill="${skin}"/><ellipse cx="212" cy="128" rx="10" ry="13" fill="${skin}"/>
+      <path d="M87 122 Q82 129 88 136 M213 122 Q218 129 212 136" fill="none" stroke="${shade(skin, .72)}" stroke-width="2" stroke-linecap="round"/>
+      <path d="M88 114 Q88 54 150 54 Q212 54 212 114 Q212 160 184 177 Q150 193 116 177 Q88 160 88 114Z" fill="${skin}"/>
+      <path d="M128 182 Q150 192 172 182 Q160 196 150 196 Q140 196 128 182Z" fill="${shade(skin, .82)}" opacity=".55" data-flat="1"/>`,
     shoes: draw(look.shoes),
     bottom: look.dress ? '' : draw(look.bottom),
     top: look.dress ? '' : draw(look.top),
@@ -219,7 +236,33 @@ export function dollSVG(look, { viewBox = '0 0 300 500', only = null, cls = '' }
   };
   const order = ['bg', 'wings', 'hairBack', 'body', 'shoes', 'bottom', 'top', 'dress', 'face', 'hairFront', 'hat', 'acc'];
   const parts = only ? order.filter(k => only.includes(k)) : order;
-  return `<svg class="${cls}" viewBox="${viewBox}" xmlns="http://www.w3.org/2000/svg">${parts.map(k => `<g class="L-${k}">${L[k]}</g>`).join('')}</svg>`;
+  const used = new Set(); used.skin = skin.toLowerCase();
+  for (const k of ['wings', 'hairBack', 'body', 'shoes', 'bottom', 'top', 'dress', 'hairFront', 'hat', 'acc']) L[k] = paint(L[k], used);
+  // skin gets a much gentler, warmer gradient than clothes, so it glows instead of looking grey
+  const skins = new Set([skin, shade(skin, .93)].map(x => x.toLowerCase()));
+  const defs = [...used].map(hex => skins.has(hex)
+    ? `<linearGradient id="sg${hex.slice(1)}" x1="0" y1="0" x2=".2" y2="1"><stop offset="0" stop-color="${mix(hex, '#fff4ee', .35)}"/><stop offset=".6" stop-color="${hex}"/><stop offset="1" stop-color="${mix(shade(hex, .93), '#ff9a8a', .08)}"/></linearGradient>`
+    : `<linearGradient id="sg${hex.slice(1)}" x1="0" y1="0" x2=".3" y2="1"><stop offset="0" stop-color="${mix(hex, '#ffffff', .28)}"/><stop offset=".5" stop-color="${hex}"/><stop offset="1" stop-color="${shade(hex, .78)}"/></linearGradient>`).join('');
+  return `<svg class="${cls}" viewBox="${viewBox}" xmlns="http://www.w3.org/2000/svg"><defs>${defs}</defs>${parts.map(k => `<g class="L-${k}">${L[k]}</g>`).join('')}</svg>`;
+}
+
+// Turn flat colours into painted ones: every filled shape gets a light-to-shadow
+// gradient and a fine outline in a darker shade of its own colour.
+function mix(a, b, t) {
+  const p = h => [1, 3, 5].map(i => parseInt(h.slice(i, i + 2), 16));
+  const [x, y] = [p(a), p(b)];
+  return '#' + x.map((v, i) => Math.round(v + (y[i] - v) * t).toString(16).padStart(2, '0')).join('');
+}
+function paint(svg, used) {
+  return svg.replace(/<(path|rect|ellipse|circle)\b([^>]*?)\/?>/g, (m, tag, attrs) => {
+    if (attrs.includes('data-flat')) return m;
+    const f = attrs.match(/fill="(#[0-9a-fA-F]{6})"/);
+    if (!f) return m;
+    const hex = f[1].toLowerCase(); used.add(hex);
+    let a = attrs.replace(f[0], `fill="url(#sg${hex.slice(1)})"`);
+    if (!/stroke=/.test(a)) a += ` stroke="${shade(hex, used.skin === hex ? .8 : .62)}" stroke-width="${used.skin === hex ? 1.2 : 1.6}" stroke-linejoin="round"`;
+    return `<${tag}${a}/>`;
+  });
 }
 
 // thumbnails: show the item on a faint doll, cropped to where it sits
