@@ -128,6 +128,37 @@
   #toast.show { opacity: 1; transform: translate(-50%, 0); }
   .confetti { position: fixed; top: -20px; width: 10px; height: 14px; z-index: 50; pointer-events: none; border-radius: 3px; }
   .flystar { position: fixed; z-index: 50; font-size: 34px; pointer-events: none; transition: all .8s cubic-bezier(.5,-0.3,.6,1); }
+
+  /* ---------- dusk: a softer, darker look (the clock faces stay light, so they are easy to read) ---------- */
+  body { background: radial-gradient(ellipse at 30% 0%, #3b2a5c 0%, #2a1f45 45%, #1a1530 100%); color: #f4ecfb; }
+  .brand small { color: #c9b6ff; }
+  .stars { background: #3a2c58; color: #fff; box-shadow: 0 3px 0 #17112b; }
+  .tab { background: rgba(255,255,255,.1); color: #efe6fb; }
+  .icon { background: rgba(255,255,255,.12); color: #fff; }
+  #stage { background: #33274f; box-shadow: 0 6px 0 #17112b, 0 14px 30px rgba(0,0,0,.35); }
+  #panel { background: #2f2449; box-shadow: 0 6px 0 #17112b; color: #f4ecfb; }
+  .bar { background: #46385f; }
+  .opt { background: #3f3160; color: #fff; border-color: #584682; box-shadow: 0 4px 0 #1f1736; }
+  .opt small { color: #c3b2dd; }
+  .opt.good { background: #1d4a36; border-color: var(--good); box-shadow: 0 4px 0 #12301f; }
+  .opt.bad { background: #4c2a30; border-color: var(--bad); box-shadow: 0 4px 0 #2e171b; }
+  .three button { background: #3f3160; border-color: #584682; box-shadow: 0 4px 0 #1f1736; }
+  .three button.good { background: #1d4a36; } .three button.bad { background: #4c2a30; }
+  .soft { background: #3f3160; color: #fff; box-shadow: 0 3px 0 #1f1736; }
+  .explain { background: #3d2f58; color: #f6eefc; } .explain.good { background: #1d4a36; }
+  .explain i { color: #8fb2ff; }
+  .digital { color: #c9b6ff; }
+  .lv { background: #3f3160; color: #d9c9f5; } .lv.on { background: var(--purple); color: #fff; }
+  .cat { background: #3f3160; color: #fff; box-shadow: 0 3px 0 #1f1736; }
+  .item { background: #3a2d58; color: #fff; box-shadow: 0 4px 0 #1f1736; }
+  .grouplabel { color: #c9b6ff; }
+  .colours button { border-color: #2f2449; box-shadow: 0 0 0 2px #584682; }
+  .overlay { background: rgba(10,6,24,.6); }
+  .card { background: #2f2449; color: #f4ecfb; box-shadow: 0 10px 0 #17112b; }
+  .card input, #nameIn { background: #fff; color: #3b2450; }
+  .big.ghost { background: #3f3160; color: #ffb6d8; border-color: #584682; box-shadow: 0 4px 0 #1f1736; }
+  .pnote, .pbar small, .pbar span { color: #b9a6d6; }
+  #toast { background: #120d24; }
 </style>
 </head>
 <body>
