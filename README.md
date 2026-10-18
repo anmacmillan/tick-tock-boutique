@@ -9,3 +9,10 @@ Play: https://anmacmillan.github.io/tick-tock-boutique/
 - Short pink hand = hour, long blue hand = minutes. Help shows the minute numbers and the "past" and "to" halves.
 - Every sound and the music-box tune are made in the browser; times are read aloud.
 - Progress is saved on the iPad. Add `?name=Someone` to the link to change the name.
+
+## Art
+
+The princess doll is drawn by Igor Galochkin (Princess Character pack, bought as part of his
+"All casual/fashion packs" bundle on itch.io). Used here under the pack's licence for use in games;
+the art itself is not for resale or reuse outside this game. The originals are not in this repo:
+`tools/build_art.py` and `tools/build_thumbs.py` shrink a downloaded pack into `art/`.

@@ -41,12 +41,22 @@
   body.portrait main { grid-template-columns: 1fr; grid-template-rows: 36% 1fr; }
   #stage { position: relative; background: #fff; border-radius: 24px; box-shadow: 0 6px 0 #f0c6dd, 0 14px 30px rgba(138,92,246,.15); overflow: hidden; display: flex; flex-direction: column; }
   #doll { flex: 1; min-height: 0; display: flex; justify-content: center; align-items: center; }
-  #doll svg { height: 100%; max-width: 100%; animation: sway 4s ease-in-out infinite; transform-origin: 50% 90%; }
+  #doll { position: relative; }
+  #doll .bgsvg { position: absolute; inset: 0; width: 100%; height: 100%; }
+  .pdoll { position: relative; height: 100%; max-width: 100%; aspect-ratio: 723 / 800; animation: sway 4s ease-in-out infinite; transform-origin: 50% 90%; }
+  .pdoll img { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+  .pdoll img.pet { transform: scale(.8); transform-origin: 100% 96%; }   /* pets come at full size: smaller, at her feet */
+  .colours { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; margin: 10px 0 4px; }
+  .colours button { width: 40px; height: 40px; border-radius: 50%; border: 3px solid #fff; box-shadow: 0 2px 0 #e7d6f7, 0 0 0 2px #f0d2e6; }
+  .colours button.on { box-shadow: 0 0 0 3px var(--pink); transform: scale(1.12); }
+  .item img.th { width: 100%; height: 92px; object-fit: contain; display: block; }
+  .item.locked img.th { filter: grayscale(1) opacity(.45); }
+  .grouplabel { grid-column: 1 / -1; font-weight: 700; color: var(--purple); margin-top: 6px; }
   @keyframes sway { 0%,100% { transform: rotate(-1deg) } 50% { transform: rotate(1deg) translateY(-1%) } }
   .twinkle { position: absolute; pointer-events: none; font-size: 18px; opacity: 0; animation: twinkle 3.4s ease-in-out infinite; }
   @keyframes twinkle { 0%,100% { opacity: 0; transform: scale(.4) } 50% { opacity: .9; transform: scale(1) rotate(30deg) } }
-  #doll.happy svg { animation: hop .8s ease; }
-  #doll.sad svg { animation: tilt .8s ease; }
+  #doll.happy .pdoll { animation: hop .8s ease; }
+  #doll.sad .pdoll { animation: tilt .8s ease; }
   @keyframes hop { 0%,100% { transform: translateY(0) } 30% { transform: translateY(-6%) rotate(-3deg) } 60% { transform: translateY(0) rotate(3deg) } }
   @keyframes tilt { 0%,100% { transform: rotate(0) } 40% { transform: rotate(-4deg) } }
   #levelBar { padding: 8px 14px 12px; font-size: 15px; }
@@ -146,7 +156,9 @@
 <div id="toast"></div>
 
 <script type="module">
-import { ITEMS, BY_ID, CATS, dollSVG, thumbSVG } from './doll.js';
+import { ITEMS, BY_ID } from './doll.js';
+import { loadPrincess, princessHTML, SHOP, OPTIONAL, PCATS, DEFAULT_LOOK, FREE_ITEMS, itemName, itemCost, thumbURL, swatches } from './princess.js';
+await loadPrincess();
 
 const $ = s => document.querySelector(s);
 const rand = n => Math.floor(Math.random() * n);
@@ -165,6 +177,14 @@ const DEFAULT = {
 let S = DEFAULT;
 try { const v = JSON.parse(localStorage.getItem(KEY)); if (v) S = { ...DEFAULT, ...v, look: { ...DEFAULT.look, ...(v.look || {}) } }; } catch (e) {}
 S.owned = [...new Set([...S.owned, ...FREE])];
+if (!S.p) {
+  // moving from the drawn doll to the princess: every star she spent on old clothes comes back
+  const spent = S.owned.filter(id => BY_ID[id] && BY_ID[id].cost > 0 && BY_ID[id].cat !== 'bg').reduce((t, id) => t + BY_ID[id].cost, 0);
+  S.stars += spent; S.refund = spent;
+  S.p = { ...DEFAULT_LOOK }; S.pown = [...FREE_ITEMS];
+}
+S.pown = [...new Set([...(S.pown || []), ...FREE_ITEMS])];
+S.look.bg = S.look.bg || 'bedroom';
 const save = () => { try { localStorage.setItem(KEY, JSON.stringify(S)); } catch (e) {} };
 
 // ---------- the five levels ----------
@@ -348,6 +368,7 @@ window.__ttbLines = () => {
   L.hello = `Hello ${S.name}! Let's learn the clock.`;
   LEVELS.forEach((l, i) => { L[`lesson-${i + 1}`] = l.text.join(' ').replace(/<[^>]+>/g, ''); });
   ITEMS.filter(it => it.cost > 0).forEach(it => { L[`got-${it.id}`] = `You got the ${it.name.toLowerCase()}!`; });
+  for (const [part, list] of Object.entries(SHOP)) for (const [style, name, cost] of list) if (cost > 0) L[`got-p-${part}-${style}`] = `You got the ${name.toLowerCase()}!`;
   for (const k in L) L[k] = minnit(L[k]);
   return L;
 };
@@ -395,7 +416,8 @@ function toast(msg) { const t = $('#toast'); t.innerHTML = msg; t.classList.add(
 
 // ---------- the doll ----------
 function renderDoll(mood) {
-  $('#doll').innerHTML = dollSVG(S.look);
+  const bg = BY_ID[S.look.bg] && BY_ID[S.look.bg].draw ? `<svg class="bgsvg" viewBox="0 0 300 500" preserveAspectRatio="xMidYMid slice">${BY_ID[S.look.bg].draw()}</svg>` : '';
+  $('#doll').innerHTML = bg + princessHTML(S.p);
   if (mood) { const d = $('#doll'); d.classList.remove('happy', 'sad'); void d.offsetWidth; d.classList.add(mood); if (mood === 'happy') setTimeout(() => (Math.random() < 0.4 && sfx.yay()) || sfx.boing(), 120); }
 }
 function renderTop() {
@@ -583,33 +605,42 @@ function showLesson(n) {
 }
 
 // ---------- wardrobe ----------
-let cat = 'dress', confirmId = null;
+let cat = 'gown', confirmId = null, focus = null;   // focus: the part whose colours are showing
 function renderWardrobe() {
-  const items = ITEMS.filter(i => i.cat === cat);
-  const worn = id => {
-    const c = BY_ID[id].cat;
-    if (c === 'makeup') return S.look.makeup.includes(id);
-    if (c === 'hairColor') return S.look.hairColor === id;
-    if (c === 'skin') return S.look.skin === id;
-    if (c === 'hair') return S.look.hair === id;
-    if (c === 'eyes') return S.look.eyes === id;
-    return S.look[c] === id;
-  };
-  $('#panel').innerHTML = `<div class="cats">${CATS.map(c => `<button class="cat ${c.key === cat ? 'on' : ''}" data-cat="${c.key}">${c.icon} ${c.label}</button>`).join('')}</div>
-    <div class="items">${items.map(it => {
+  const C = PCATS.find(c => c.key === cat);
+  let grid = '';
+  if (cat === 'bg') {
+    grid = ITEMS.filter(i => i.cat === 'bg').map(it => {
       const own = S.owned.includes(it.id);
-      return `<button class="item ${own ? '' : 'locked'} ${worn(it.id) ? 'on' : ''} ${confirmId === it.id ? 'confirm' : ''}" data-item="${it.id}">
-        ${own ? '' : `<span class="price">⭐ ${it.cost}</span>`}${thumbSVG(it, S.look)}<div class="nm">${confirmId === it.id ? `Tap again to buy!` : esc(it.name)}</div></button>`;
-    }).join('')}</div>`;
+      return `<button class="item ${own ? '' : 'locked'} ${S.look.bg === it.id ? 'on' : ''} ${confirmId === 'bg:' + it.id ? 'confirm' : ''}" data-bg="${it.id}">
+        ${own ? '' : `<span class="price">⭐ ${it.cost}</span>`}<svg viewBox="0 0 300 500" style="width:100%;height:92px" preserveAspectRatio="xMidYMid slice">${it.draw()}</svg>
+        <div class="nm">${confirmId === 'bg:' + it.id ? 'Tap again to buy!' : esc(it.name)}</div></button>`;
+    }).join('');
+  } else {
+    for (const part of C.parts) {
+      if (C.parts.length > 1) grid += `<div class="grouplabel">${{ hat: 'Crowns', veil: 'Veils', necklace: 'Necklaces', earrings: 'Earrings', bracelets: 'Bracelets', gloves: 'Gloves', girdle: 'Belts', in_hand_left: 'Low hand', in_hand_right: 'High hand', eyes: 'Eyes', irises: 'Eye colour', eyebrows: 'Eyebrows', lips: 'Lips', cheeks: 'Blush' }[part]}</div>`;
+      grid += SHOP[part].map(([style, name, cost]) => {
+        const id = `${part}-${style}`, own = S.pown.includes(id), worn = S.p[part] && S.p[part][0] === style;
+        return `<button class="item ${own ? '' : 'locked'} ${worn ? 'on' : ''} ${confirmId === id ? 'confirm' : ''}" data-part="${part}" data-style="${style}">
+          ${own ? '' : `<span class="price">⭐ ${cost}</span>`}<img class="th" src="${thumbURL(part, style)}" alt="">
+          <div class="nm">${confirmId === id ? 'Tap again to buy!' : esc(name)}</div></button>`;
+      }).join('');
+    }
+  }
+  // colour choices for the thing she just picked (free once she owns it)
+  let colours = '';
+  const fp = focus && C.parts.includes(focus) ? focus : C.parts.find(p => S.p[p]);
+  if (fp && S.p[fp]) {
+    const sw = swatches(fp, S.p[fp][0]);
+    if (sw.length > 1) colours = `<div class="grouplabel" style="text-align:center">🎨 Pick a colour for your ${esc(itemName(fp, S.p[fp][0]).toLowerCase())}</div><div class="colours">${sw.map((c, i) => `<button class="${S.p[fp][1] === i + 1 ? 'on' : ''}" style="background:${c}" data-colour="${i + 1}" data-cpart="${fp}" aria-label="colour ${i + 1}"></button>`).join('')}</div>`;
+  }
+  $('#panel').innerHTML = `<div class="cats">${PCATS.map(c => `<button class="cat ${c.key === cat ? 'on' : ''}" data-cat="${c.key}">${c.icon} ${c.label}</button>`).join('')}</div>${colours}<div class="items">${grid}</div>`;
 }
-function wear(it) {
-  const L = S.look;
-  if (it.cat === 'makeup') {
-    if (L.makeup.includes(it.id)) L.makeup = L.makeup.filter(x => x !== it.id);
-    else { L.makeup = L.makeup.filter(x => !(it.group && BY_ID[x] && BY_ID[x].group === it.group)); L.makeup.push(it.id); }
-  } else if (['top', 'bottom'].includes(it.cat)) { L[it.cat] = it.id; L.dress = null; }
-  else if (CATS.find(c => c.key === it.cat).optional && L[it.cat] === it.id) L[it.cat] = null;   // tap again to take it off
-  else L[it.cat] = it.id;
+function wearPart(part, style) {
+  const cur = S.p[part];
+  if (cur && cur[0] === style && OPTIONAL.has(part)) S.p[part] = null;            // tap again to take it off
+  else S.p[part] = [style, cur ? cur[1] : Math.ceil((swatches(part, style).length || 1) / 2)];
+  focus = part;
   save(); sfx.wear(); renderDoll(); renderWardrobe();
 }
 $('#panel').addEventListener('click', e => {
@@ -618,15 +649,28 @@ $('#panel').addEventListener('click', e => {
   if (lv) { const n = +lv.dataset.lv; if (n > S.unlocked) { toast('Finish the level before to open this one!'); return; } S.level = n; save(); renderTop(); if (!S.seen[n]) showLesson(n); newQuestion(); return; }
   const c = e.target.closest('[data-cat]');
   if (c) { sfx.pop(); cat = c.dataset.cat; confirmId = null; renderWardrobe(); return; }
-  const itb = e.target.closest('[data-item]');
-  if (itb) {
-    const it = BY_ID[itb.dataset.item];
-    if (S.owned.includes(it.id)) { confirmId = null; sfx.pop(); wear(it); return; }
+  const col = e.target.closest('[data-colour]');
+  if (col) { const p = col.dataset.cpart; S.p[p] = [S.p[p][0], +col.dataset.colour]; focus = p; save(); sfx.wear(); renderDoll(); renderWardrobe(); return; }
+  const bgb = e.target.closest('[data-bg]');
+  if (bgb) {
+    const it = BY_ID[bgb.dataset.bg];
+    if (S.owned.includes(it.id)) { confirmId = null; S.look.bg = it.id; save(); sfx.wear(); renderDoll(); renderWardrobe(); return; }
     if (S.stars < it.cost) { toast(`You need ${it.cost - S.stars} more ⭐. Go and read some clocks!`); sfx.bad(); voice(['need'], ''); return; }
-    if (confirmId !== it.id) { confirmId = it.id; renderWardrobe(); return; }
-    S.stars -= it.cost; S.owned.push(it.id); confirmId = null; save(); sfx.buy(); confetti(40);
+    if (confirmId !== 'bg:' + it.id) { confirmId = 'bg:' + it.id; renderWardrobe(); return; }
+    S.stars -= it.cost; S.owned.push(it.id); S.look.bg = it.id; confirmId = null; save(); sfx.buy(); confetti(40);
     toast(`✨ You got the ${esc(it.name)}!`); voice([`got-${it.id}`], `You got the ${it.name}!`);
-    renderTop(); wear(it); renderDoll('happy');
+    renderTop(); renderDoll('happy'); renderWardrobe();
+    return;
+  }
+  const itb = e.target.closest('[data-part]');
+  if (itb) {
+    const part = itb.dataset.part, style = +itb.dataset.style, id = `${part}-${style}`, cost = itemCost(part, style), name = itemName(part, style);
+    if (S.pown.includes(id)) { confirmId = null; sfx.pop(); wearPart(part, style); return; }
+    if (S.stars < cost) { toast(`You need ${cost - S.stars} more ⭐. Go and read some clocks!`); sfx.bad(); voice(['need'], ''); return; }
+    if (confirmId !== id) { confirmId = id; renderWardrobe(); return; }
+    S.stars -= cost; S.pown.push(id); confirmId = null; save(); sfx.buy(); confetti(40);
+    toast(`✨ You got the ${esc(name)}!`); voice([`got-p-${id}`], `You got the ${name}!`);
+    renderTop(); wearPart(part, style); renderDoll('happy');
     return;
   }
   if (answered || !Q) return;
@@ -663,6 +707,7 @@ layout();
 renderDoll(); renderTop(); newQuestion();
 for (let i = 0; i < 9; i++) { const t = document.createElement('div'); t.className = 'twinkle'; t.textContent = pick(['✨', '⭐', '💫']); t.style.left = 6 + rand(86) + '%'; t.style.top = 4 + rand(80) + '%'; t.style.animationDelay = (i * 0.4) + 's'; $('#stage').appendChild(t); }
 if (!S.started) { $('#nameIn').value = S.name; $('#welcome').classList.add('show'); }
+if (S.refund) { const n = S.refund; setTimeout(() => toast(`👑 Welcome to the new Princess Boutique! Your ${n} stars from old clothes are back to spend.`), 800); S.refund = 0; save(); }
 document.addEventListener('pointerdown', () => { audio(); startMusic(); }, true);
 document.addEventListener('visibilitychange', () => { if (!document.hidden && AC && AC.state !== 'running') AC.resume(); });
 window.__ttb = { get S() { return S; }, get Q() { return Q; } };
