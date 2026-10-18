@@ -1057,7 +1057,16 @@ function progressHTML(kind) {
     <p>⭐ <b>${S.stars}</b> stars &nbsp;·&nbsp; 🏆 <b>${finished()}</b> of ${TOTAL_LEVELS} levels &nbsp;·&nbsp; ⏰ <b>${S.total}</b> clocks right in all</p>
     ${bestK ? `<p>💪 Really good at: <b>${esc(CAT_LABEL(bestK))}</b></p>` : ''}
     ${pracK ? `<p>🌱 Lovely to practise next: <b>${esc(CAT_LABEL(pracK))}</b></p>` : ''}
+    ${blitzLine()}
     <div class="pweek">${bars}</div><p class="pnote">Clocks read each day this week</p>`;
+}
+// every clock read here also unlocks new block looks in Block Blitz
+function blitzLine() {
+  const looks = [[10, 'Candy'], [30, 'Ice palace'], [60, 'Galaxy'], [100, 'Rainbow glitter']];
+  const next = looks.find(([n]) => (S.total || 0) < n);
+  if (!next) return `<p>🧱 You have unlocked every Block Blitz look! 🌈</p>`;
+  const left = next[0] - (S.total || 0);
+  return `<p>🧱 Read <b>${left}</b> more clock${left > 1 ? 's' : ''} to unlock <b>${next[1]}</b> blocks in Block Blitz!</p>`;
 }
 function showProgress(kind) {
   $('#progCard').innerHTML = progressHTML(kind) + `<div class="row"><button class="big" id="progBtn">${kind === 'tonight' ? 'Keep playing' : "Let's play!"}</button><button class="big ghost" id="progSay">🔊 Listen</button></div>` +
